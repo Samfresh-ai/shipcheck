@@ -1,10 +1,24 @@
 "use client";
 
 import { useEffect } from "react";
+import { initializeAnalyticsVisitor } from "@/src/lib/analytics";
+
+function createFallbackSessionId() {
+  if (typeof window.crypto?.randomUUID === "function") {
+    return window.crypto.randomUUID();
+  }
+
+  return `shipcheck-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 export function SessionBootstrap() {
   useEffect(() => {
-    if (window.localStorage.getItem("shipcheck_session_id")) return;
+    const storedSessionId = window.localStorage.getItem("shipcheck_session_id");
+
+    if (storedSessionId) {
+      initializeAnalyticsVisitor(storedSessionId);
+      return;
+    }
 
     fetch("/api/sessions", {
       method: "POST",
@@ -13,9 +27,15 @@ export function SessionBootstrap() {
     })
       .then((response) => response.json())
       .then((data: { sessionId?: string }) => {
-        if (data.sessionId) window.localStorage.setItem("shipcheck_session_id", data.sessionId);
+        const sessionId = data.sessionId || createFallbackSessionId();
+        window.localStorage.setItem("shipcheck_session_id", sessionId);
+        initializeAnalyticsVisitor(sessionId);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        const sessionId = createFallbackSessionId();
+        window.localStorage.setItem("shipcheck_session_id", sessionId);
+        initializeAnalyticsVisitor(sessionId);
+      });
   }, []);
 
   return null;
