@@ -58,3 +58,9 @@ CREATE POLICY "Insert drop_off" ON drop_off_events FOR INSERT WITH CHECK (true);
 ALTER TABLE feedback_reactions ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Manage reactions" ON feedback_reactions;
 CREATE POLICY "Manage reactions" ON feedback_reactions FOR ALL USING (true);
+
+GRANT USAGE ON SCHEMA public TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON sessions TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON reports TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON drop_off_events TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON feedback_reactions TO service_role;
