@@ -23,7 +23,13 @@ export function ReportHeader({ report }: { report: ShipReport }) {
           <p className="text-sm text-[#665f54]">{TIER_CONFIG[report.scoreTier].message}</p>
         </div>
         <div className="mt-7">
-          <ShareButton reportId={report.id} />
+          <ShareButton
+            reportId={report.id}
+            score={report.overallScore}
+            tier={report.scoreTier}
+            projectCategory={report.projectContext.category}
+            projectStage={report.projectContext.stage}
+          />
         </div>
       </div>
       <ScoreCircle score={report.overallScore} />
