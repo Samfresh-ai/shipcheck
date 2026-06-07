@@ -52,6 +52,12 @@ export function WizardShell({ step }: { step: number }) {
       if (!question) return;
       const sessionId = getStoredSessionId();
       if (!sessionId) return;
+      track("wizard_dropoff", {
+        sessionId,
+        questionIndex: question.index,
+        sectionId: question.sectionId,
+        eventType: "exit",
+      });
       navigator.sendBeacon(
         "/api/dropoff",
         new Blob(
@@ -98,6 +104,12 @@ export function WizardShell({ step }: { step: number }) {
   async function goBack() {
     const sessionId = getStoredSessionId();
     if (sessionId) {
+      track("wizard_dropoff", {
+        sessionId,
+        questionIndex: activeQuestion.index,
+        sectionId: activeQuestion.sectionId,
+        eventType: "back",
+      });
       fetch("/api/dropoff", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -180,6 +192,13 @@ export function WizardShell({ step }: { step: number }) {
           router.push(`/report/${event.reportId}`);
         }
         if (event.type === "error") {
+          track("report_generation_failed", {
+            sessionId,
+            errorMessage: String(event.message).substring(0, 100),
+            category: activeContext.category,
+            stage: activeContext.stage,
+            questionsAnswered: Object.keys(answers).length,
+          });
           setLoading((current) => ({ ...current, error: event.message }));
         }
       }

@@ -29,7 +29,15 @@ export function ProjectSetupForm() {
 
   useEffect(() => {
     const stored = window.localStorage.getItem("shipcheck_context");
-    if (stored) setState({ ...defaultState, ...JSON.parse(stored) });
+    if (stored) {
+      const previous = JSON.parse(stored) as Partial<SetupState>;
+      setState({ ...defaultState, ...previous });
+      track("assessment_restarted", {
+        previousCategory: previous.category ?? "unknown",
+        previousStage: previous.stage ?? "unknown",
+        isReturningUser: true,
+      });
+    }
   }, []);
 
   function update<K extends keyof SetupState>(key: K, value: SetupState[K]) {

@@ -4,7 +4,15 @@ import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { track } from "@/src/lib/analytics";
 
-export function ShareButton({ reportId }: { reportId: string }) {
+type ShareButtonProps = {
+  reportId: string;
+  score?: number;
+  tier?: string;
+  projectCategory?: string;
+  projectStage?: string;
+};
+
+export function ShareButton({ reportId, score, tier, projectCategory, projectStage }: ShareButtonProps) {
   const [copied, setCopied] = useState(false);
 
   async function share() {
@@ -12,6 +20,13 @@ export function ShareButton({ reportId }: { reportId: string }) {
     await navigator.clipboard.writeText(url);
     setCopied(true);
     track("report_shared", { reportId });
+    track("report_shared_with_score", {
+      reportId,
+      score,
+      tier,
+      projectCategory,
+      projectStage,
+    });
     setTimeout(() => setCopied(false), 2000);
   }
 
