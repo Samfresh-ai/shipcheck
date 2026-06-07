@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --paper: #fbfaf7;
+  --ink: #171717;
+  --muted: #665f54;
+  --rule: #ded7ca;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+body {
+  min-height: 100vh;
+  background:
+    linear-gradient(rgba(23, 23, 23, 0.025) 1px, transparent 1px),
+    var(--paper);
+  background-size: 100% 32px;
+}
+
+a {
+  text-underline-offset: 4px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: #dbe4ff;
+}
