@@ -10,7 +10,7 @@ describe("reports API", () => {
   it("streams per-section events and saves final report", async () => {
     const response = await POST(
       jsonRequest("/api/reports", {
-        sessionId: "session-1",
+        sessionId: "00000000-0000-4000-8000-000000000101",
         projectName: "ShipCheck",
         projectContext: {
           productName: "ShipCheck",

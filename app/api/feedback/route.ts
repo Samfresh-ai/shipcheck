@@ -3,7 +3,7 @@ import { z } from "zod";
 import { recordFeedback } from "@/src/lib/supabase";
 
 const feedbackSchema = z.object({
-  reportId: z.string().min(1),
+  reportId: z.string().uuid(),
   questionId: z.string().min(1),
   reaction: z.enum(["helpful", "not_helpful"]),
 });

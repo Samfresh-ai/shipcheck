@@ -7,7 +7,7 @@ import { computeOverallScore } from "@/src/lib/scoring";
 import { saveReport } from "@/src/lib/supabase";
 
 const reportRequestSchema = z.object({
-  sessionId: z.string().min(1),
+  sessionId: z.string().uuid(),
   projectName: z.string().min(1).max(60),
   projectUrl: z.string().url().optional().or(z.literal("")).transform((value) => value || undefined),
   projectContext: projectContextSchema,

@@ -6,7 +6,7 @@ describe("POST /api/dropoff", () => {
   it("records a drop-off event", async () => {
     const response = await POST(
       jsonRequest("/api/dropoff", {
-        sessionId: "session-1",
+        sessionId: "00000000-0000-4000-8000-000000000102",
         questionIndex: 4,
         sectionId: "problem",
         eventType: "exit",
