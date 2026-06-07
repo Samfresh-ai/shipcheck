@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { initializeAnalyticsVisitor } from "@/src/lib/analytics";
+import { getOrCreateAnalyticsVisitorId, initializeAnalyticsVisitor } from "@/src/lib/analytics";
 
 function createFallbackSessionId() {
   if (typeof window.crypto?.randomUUID === "function") {
@@ -16,7 +16,7 @@ export function SessionBootstrap() {
     const storedSessionId = window.localStorage.getItem("shipcheck_session_id");
 
     if (storedSessionId) {
-      initializeAnalyticsVisitor(storedSessionId);
+      initializeAnalyticsVisitor(getOrCreateAnalyticsVisitorId());
       return;
     }
 
@@ -29,12 +29,12 @@ export function SessionBootstrap() {
       .then((data: { sessionId?: string }) => {
         const sessionId = data.sessionId || createFallbackSessionId();
         window.localStorage.setItem("shipcheck_session_id", sessionId);
-        initializeAnalyticsVisitor(sessionId);
+        initializeAnalyticsVisitor(getOrCreateAnalyticsVisitorId());
       })
       .catch(() => {
         const sessionId = createFallbackSessionId();
         window.localStorage.setItem("shipcheck_session_id", sessionId);
-        initializeAnalyticsVisitor(sessionId);
+        initializeAnalyticsVisitor(getOrCreateAnalyticsVisitorId());
       });
   }, []);
 

@@ -1,16 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSession } from "@/src/lib/supabase";
-
-function hashIp(ip: string | null): string | undefined {
-  if (!ip) return undefined;
-  return Buffer.from(ip).toString("base64url").slice(0, 24);
-}
+import { clientIpFromHeaders, hashIp } from "@/src/lib/request-security";
 
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json().catch(() => ({}))) as { userAgent?: string };
-    const userAgent = body.userAgent || request.headers.get("user-agent") || undefined;
-    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
+    const userAgent = (body.userAgent || request.headers.get("user-agent") || undefined)?.slice(0, 500);
+    const ip = clientIpFromHeaders(request.headers);
     const sessionId = await createSession({ userAgent, ipHash: hashIp(ip) });
 
     return NextResponse.json({ sessionId });

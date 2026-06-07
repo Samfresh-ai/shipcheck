@@ -3,25 +3,101 @@ import { z } from "zod";
 import { evaluateSection, formatSse, generateOverallInsight } from "@/src/lib/evaluate";
 import { projectContextSchema } from "@/src/lib/project-context";
 import { QUESTIONS, SECTIONS, SECTION_ORDER, getSectionQuestions } from "@/src/lib/questions";
+import { clientIpFromHeaders, consumeRateLimitSlot, hashIp } from "@/src/lib/request-security";
 import { computeOverallScore } from "@/src/lib/scoring";
-import { saveReport } from "@/src/lib/supabase";
+import { countRecentReportsForSession, saveReport, sessionExists } from "@/src/lib/supabase";
+
+const MAX_REPORT_REQUEST_BYTES = 40_000;
+const MAX_ANSWER_CHARACTERS = 1_200;
+const REPORT_SECTION_CONCURRENCY = 2;
+const TRANSIENT_REPORT_LIMIT = 8;
+const TRANSIENT_REPORT_WINDOW_MS = 10 * 60 * 1000;
+const MAX_REPORTS_PER_SESSION_PER_HOUR = 4;
+const EXPECTED_QUESTION_IDS = new Set(QUESTIONS.map((question) => question.id));
+
+const sseHeaders = {
+  "Content-Type": "text/event-stream; charset=utf-8",
+  "Cache-Control": "no-store, no-transform",
+};
+
+function sseError(message: string, status: number, extraHeaders?: Record<string, string>) {
+  return new Response(formatSse({ type: "error", message }), {
+    status,
+    headers: { ...sseHeaders, ...(extraHeaders ?? {}) },
+  });
+}
+
+async function parseBoundedJson(request: NextRequest): Promise<{ ok: true; data: unknown } | { ok: false; response: Response }> {
+  const contentLength = Number(request.headers.get("content-length") || 0);
+  if (Number.isFinite(contentLength) && contentLength > MAX_REPORT_REQUEST_BYTES) {
+    return { ok: false, response: sseError("Report request is too large.", 413) };
+  }
+
+  const rawBody = await request.text();
+  if (new TextEncoder().encode(rawBody).byteLength > MAX_REPORT_REQUEST_BYTES) {
+    return { ok: false, response: sseError("Report request is too large.", 413) };
+  }
+
+  try {
+    return { ok: true, data: JSON.parse(rawBody) };
+  } catch {
+    return { ok: false, response: sseError("Report request body must be valid JSON.", 400) };
+  }
+}
+
+const answersSchema = z.record(z.string().min(1), z.string().trim().min(20).max(MAX_ANSWER_CHARACTERS)).superRefine((answers, context) => {
+  const answerIds = Object.keys(answers);
+  const unknownIds = answerIds.filter((id) => !EXPECTED_QUESTION_IDS.has(id));
+  const missingIds = QUESTIONS.map((question) => question.id).filter((id) => !(id in answers));
+
+  if (unknownIds.length > 0) {
+    context.addIssue({
+      code: "custom",
+      message: `Unexpected answer ids: ${unknownIds.join(", ")}`,
+    });
+  }
+
+  if (missingIds.length > 0) {
+    context.addIssue({
+      code: "custom",
+      message: `Missing answer ids: ${missingIds.join(", ")}`,
+    });
+  }
+});
 
 const reportRequestSchema = z.object({
   sessionId: z.string().uuid(),
   projectName: z.string().min(1).max(60),
   projectUrl: z.string().url().optional().or(z.literal("")).transform((value) => value || undefined),
   projectContext: projectContextSchema,
-  answers: z.record(z.string().min(1), z.string()),
+  answers: answersSchema,
 });
 
 export async function POST(request: NextRequest) {
-  const payload = reportRequestSchema.safeParse(await request.json());
+  const body = await parseBoundedJson(request);
+  if (!body.ok) return body.response;
+
+  const payload = reportRequestSchema.safeParse(body.data);
 
   if (!payload.success) {
-    return new Response(formatSse({ type: "error", message: payload.error.message }), {
-      status: 400,
-      headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
-    });
+    return sseError(payload.error.message, 400);
+  }
+
+  const reportPayload = payload.data;
+  const ipHash = hashIp(clientIpFromHeaders(request.headers));
+  const rateLimit = consumeRateLimitSlot(`reports:${ipHash ?? reportPayload.sessionId}`, TRANSIENT_REPORT_LIMIT, TRANSIENT_REPORT_WINDOW_MS);
+  if (!rateLimit.allowed) {
+    return sseError("Too many report requests. Try again shortly.", 429, { "Retry-After": String(rateLimit.retryAfterSeconds) });
+  }
+
+  if (!(await sessionExists(reportPayload.sessionId))) {
+    return sseError("Session expired. Reload the page and try again.", 403);
+  }
+
+  const recentReportCutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const recentReportsForSession = await countRecentReportsForSession(reportPayload.sessionId, recentReportCutoff);
+  if (recentReportsForSession >= MAX_REPORTS_PER_SESSION_PER_HOUR) {
+    return sseError("This session has reached the report limit. Start a new session later.", 429, { "Retry-After": "3600" });
   }
 
   const encoder = new TextEncoder();
@@ -32,19 +108,31 @@ export async function POST(request: NextRequest) {
       try {
         const allEvaluations = {};
 
-        const sectionResults = await Promise.all(
-          SECTION_ORDER.map(async (sectionId) => {
+        let nextSectionIndex = 0;
+        const sectionResults = new Array<{
+          sectionId: (typeof SECTION_ORDER)[number];
+          evaluations: Awaited<ReturnType<typeof evaluateSection>> | undefined;
+          error: Error | undefined;
+        }>(SECTION_ORDER.length);
+
+        async function worker() {
+          while (nextSectionIndex < SECTION_ORDER.length) {
+            const currentIndex = nextSectionIndex;
+            nextSectionIndex += 1;
+            const sectionId = SECTION_ORDER[currentIndex];
             send({ type: "section_start", sectionId });
             try {
               const sectionQuestions = getSectionQuestions(sectionId);
-              const evaluations = await evaluateSection(sectionId, sectionQuestions, payload.data.answers, payload.data.projectContext);
+              const evaluations = await evaluateSection(sectionId, sectionQuestions, reportPayload.answers, reportPayload.projectContext);
               send({ type: "section_complete", sectionId, evaluations });
-              return { sectionId, evaluations, error: undefined };
+              sectionResults[currentIndex] = { sectionId, evaluations, error: undefined };
             } catch (error) {
-              return { sectionId, evaluations: undefined, error: error as Error };
+              sectionResults[currentIndex] = { sectionId, evaluations: undefined, error: error as Error };
             }
-          }),
-        );
+          }
+        }
+
+        await Promise.all(Array.from({ length: Math.min(REPORT_SECTION_CONCURRENCY, SECTION_ORDER.length) }, () => worker()));
 
         const failedSection = sectionResults.find((result) => result.error);
         if (failedSection?.error) {
@@ -58,16 +146,16 @@ export async function POST(request: NextRequest) {
 
         const { overall, sectionScores, tier } = computeOverallScore(allEvaluations, QUESTIONS, SECTIONS);
         const overallInsight = await generateOverallInsight({
-          context: payload.data.projectContext,
+          context: reportPayload.projectContext,
           sectionScores,
           evaluations: allEvaluations,
         });
         const report = await saveReport({
-          sessionId: payload.data.sessionId,
-          projectName: payload.data.projectName,
-          projectUrl: payload.data.projectUrl,
-          projectContext: payload.data.projectContext,
-          answers: payload.data.answers,
+          sessionId: reportPayload.sessionId,
+          projectName: reportPayload.projectName,
+          projectUrl: reportPayload.projectUrl,
+          projectContext: reportPayload.projectContext,
+          answers: reportPayload.answers,
           aiFeedback: allEvaluations,
           sectionScores,
           overallScore: overall,
@@ -93,8 +181,7 @@ export async function POST(request: NextRequest) {
 
   return new Response(stream, {
     headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-store, no-transform",
+      ...sseHeaders,
       Connection: "keep-alive",
     },
   });

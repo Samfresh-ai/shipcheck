@@ -60,6 +60,34 @@ export async function createSession(input: { userAgent?: string; ipHash?: string
   return data.id;
 }
 
+export async function sessionExists(id: string): Promise<boolean> {
+  const client = supabaseAdmin();
+  if (!client) {
+    return localDb().sessions.has(id);
+  }
+
+  const { data, error } = await client.from("sessions").select("id").eq("id", id).maybeSingle<{ id: string }>();
+  if (error) return false;
+
+  return Boolean(data?.id);
+}
+
+export async function countRecentReportsForSession(sessionId: string, sinceIso: string): Promise<number> {
+  const client = supabaseAdmin();
+  if (!client) {
+    return [...localDb().reports.values()].filter((report) => report.sessionId === sessionId && (report.createdAt ?? "") >= sinceIso).length;
+  }
+
+  const { count, error } = await client
+    .from("reports")
+    .select("id", { count: "exact", head: true })
+    .eq("session_id", sessionId)
+    .gte("created_at", sinceIso);
+
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
+
 export async function saveReport(input: ReportInsert): Promise<ShipReport> {
   const id = randomUUID();
   const report: ShipReport = {

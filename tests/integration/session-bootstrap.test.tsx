@@ -19,16 +19,18 @@ describe("SessionBootstrap", () => {
 
   it("initializes analytics with an existing stored session id", () => {
     window.localStorage.setItem("shipcheck_session_id", "session-existing");
+    window.localStorage.setItem("shipcheck_analytics_id", "analytics-existing");
 
     render(<SessionBootstrap />);
 
     expect(initialize).toHaveBeenCalledWith({
-      visitor: { id: "session-existing" },
+      visitor: { id: "analytics-existing" },
       account: { id: "shipcheck-public" },
     });
   });
 
   it("creates a session and initializes analytics with that visitor id", async () => {
+    window.localStorage.setItem("shipcheck_analytics_id", "analytics-created");
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       json: () => Promise.resolve({ sessionId: "session-created" }),
     } as Response);
@@ -38,7 +40,7 @@ describe("SessionBootstrap", () => {
     await waitFor(() => {
       expect(window.localStorage.getItem("shipcheck_session_id")).toBe("session-created");
       expect(initialize).toHaveBeenCalledWith({
-        visitor: { id: "session-created" },
+        visitor: { id: "analytics-created" },
         account: { id: "shipcheck-public" },
       });
     });

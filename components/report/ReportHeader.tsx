@@ -10,7 +10,7 @@ import type { ShipReport } from "@/src/lib/report-types";
 
 export function ReportHeader({ report }: { report: ShipReport }) {
   useEffect(() => {
-    track("report_viewed", { reportId: report.id, score: report.overallScore, tier: report.scoreTier });
+    track("report_viewed", { score: report.overallScore, tier: report.scoreTier });
   }, [report.id, report.overallScore, report.scoreTier]);
 
   return (
@@ -24,7 +24,6 @@ export function ReportHeader({ report }: { report: ShipReport }) {
         </div>
         <div className="mt-7">
           <ShareButton
-            reportId={report.id}
             score={report.overallScore}
             tier={report.scoreTier}
             projectCategory={report.projectContext.category}

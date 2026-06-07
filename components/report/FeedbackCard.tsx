@@ -26,7 +26,7 @@ export function FeedbackCard({
   const [expanded, setExpanded] = useState(false);
 
   async function react(reaction: "helpful" | "not_helpful") {
-    track("feedback_reaction", { reportId, questionId: question.id, reaction, tier: evaluation.tier });
+    track("feedback_reaction", { questionId: question.id, reaction, tier: evaluation.tier });
     await fetch("/api/feedback", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

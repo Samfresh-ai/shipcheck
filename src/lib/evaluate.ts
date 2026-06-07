@@ -21,11 +21,13 @@ type EvaluationProviderConfig = PublicEvaluationProviderConfig & {
 };
 
 const DEFAULT_OPENAI_EVALUATION_MODEL = "gpt-5-mini";
+const DEFAULT_OPENAI_TIMEOUT_MS = 45_000;
 const DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
 const DEFAULT_NVIDIA_EVALUATION_MODEL = "nvidia/nvidia-nemotron-nano-9b-v2";
-const DEFAULT_NVIDIA_TIMEOUT_MS = 120_000;
+const DEFAULT_NVIDIA_TIMEOUT_MS = 45_000;
 const DEFAULT_NVIDIA_MAX_TOKENS = 1_200;
 const MAX_MODEL_OUTPUT_TOKENS = 2_048;
+const MAX_PROVIDER_TIMEOUT_MS = 45_000;
 
 function configuredProvider(env: NodeJS.ProcessEnv): EvaluationProvider | "auto" | undefined {
   const provider = (env.SHIPCHECK_AI_PROVIDER || env.AI_PROVIDER)?.trim().toLowerCase();
@@ -52,6 +54,10 @@ function modelTokenLimitFromEnv(env: NodeJS.ProcessEnv, key: string, defaultValu
   return Math.min(positiveIntegerFromEnv(env, key, defaultValue), MAX_MODEL_OUTPUT_TOKENS);
 }
 
+function providerTimeoutFromEnv(env: NodeJS.ProcessEnv, key: string, defaultValue: number): number {
+  return Math.min(positiveIntegerFromEnv(env, key, defaultValue), MAX_PROVIDER_TIMEOUT_MS);
+}
+
 function resolveEvaluationProviderConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
   const provider = configuredProvider(env);
   const nvidiaApiKey = env.NVIDIA_API_KEY || env.NVCF_RUN_KEY;
@@ -62,6 +68,7 @@ function resolveEvaluationProviderConfig(env: NodeJS.ProcessEnv): EvaluationProv
       provider: "openai",
       apiKey: env.OPENAI_API_KEY,
       model: env.OPENAI_EVALUATION_MODEL || DEFAULT_OPENAI_EVALUATION_MODEL,
+      timeoutMs: providerTimeoutFromEnv(env, "OPENAI_TIMEOUT_MS", DEFAULT_OPENAI_TIMEOUT_MS),
     };
   }
 
@@ -72,7 +79,7 @@ function resolveEvaluationProviderConfig(env: NodeJS.ProcessEnv): EvaluationProv
       apiKey: nvidiaApiKey,
       baseURL: (env.NVIDIA_BASE_URL || DEFAULT_NVIDIA_BASE_URL).replace(/\/+$/, ""),
       model: env.NVIDIA_EVALUATION_MODEL || env.NVIDIA_MODEL || DEFAULT_NVIDIA_EVALUATION_MODEL,
-      timeoutMs: positiveIntegerFromEnv(env, "NVIDIA_TIMEOUT_MS", DEFAULT_NVIDIA_TIMEOUT_MS),
+      timeoutMs: providerTimeoutFromEnv(env, "NVIDIA_TIMEOUT_MS", DEFAULT_NVIDIA_TIMEOUT_MS),
       maxTokens: modelTokenLimitFromEnv(env, "NVIDIA_MAX_TOKENS", DEFAULT_NVIDIA_MAX_TOKENS),
     };
   }
@@ -82,6 +89,7 @@ function resolveEvaluationProviderConfig(env: NodeJS.ProcessEnv): EvaluationProv
       provider: "openai",
       apiKey: env.OPENAI_API_KEY,
       model: env.OPENAI_EVALUATION_MODEL || DEFAULT_OPENAI_EVALUATION_MODEL,
+      timeoutMs: providerTimeoutFromEnv(env, "OPENAI_TIMEOUT_MS", DEFAULT_OPENAI_TIMEOUT_MS),
     };
   }
 
@@ -91,7 +99,7 @@ function resolveEvaluationProviderConfig(env: NodeJS.ProcessEnv): EvaluationProv
       apiKey: nvidiaApiKey,
       baseURL: (env.NVIDIA_BASE_URL || DEFAULT_NVIDIA_BASE_URL).replace(/\/+$/, ""),
       model: env.NVIDIA_EVALUATION_MODEL || env.NVIDIA_MODEL || DEFAULT_NVIDIA_EVALUATION_MODEL,
-      timeoutMs: positiveIntegerFromEnv(env, "NVIDIA_TIMEOUT_MS", DEFAULT_NVIDIA_TIMEOUT_MS),
+      timeoutMs: providerTimeoutFromEnv(env, "NVIDIA_TIMEOUT_MS", DEFAULT_NVIDIA_TIMEOUT_MS),
       maxTokens: modelTokenLimitFromEnv(env, "NVIDIA_MAX_TOKENS", DEFAULT_NVIDIA_MAX_TOKENS),
     };
   }
@@ -202,13 +210,16 @@ async function runNvidiaCompletion(config: EvaluationProviderConfig, instruction
 }
 
 async function runOpenAiResponse(config: EvaluationProviderConfig, instructions: string, input: string, maxTokens: number): Promise<string> {
-  const client = new OpenAI({ apiKey: config.apiKey });
-  const response = await client.responses.create({
-    model: config.model,
-    instructions,
-    input,
-    max_output_tokens: maxTokens,
-  });
+  const client = new OpenAI({ apiKey: config.apiKey, timeout: config.timeoutMs });
+  const response = await client.responses.create(
+    {
+      model: config.model,
+      instructions,
+      input,
+      max_output_tokens: maxTokens,
+    },
+    { timeout: config.timeoutMs },
+  );
 
   return response.output_text?.trim() ?? "";
 }

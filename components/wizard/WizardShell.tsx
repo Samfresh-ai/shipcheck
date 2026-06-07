@@ -43,7 +43,7 @@ export function WizardShell({ step }: { step: number }) {
 
   useEffect(() => {
     if (step === 0 && context) {
-      track("wizard_started", { sessionId: getStoredSessionId(), category: context.category });
+      track("wizard_started", { category: context.category });
     }
   }, [context, step]);
 
@@ -53,7 +53,6 @@ export function WizardShell({ step }: { step: number }) {
       const sessionId = getStoredSessionId();
       if (!sessionId) return;
       track("wizard_dropoff", {
-        sessionId,
         questionIndex: question.index,
         sectionId: question.sectionId,
         eventType: "exit",
@@ -105,7 +104,6 @@ export function WizardShell({ step }: { step: number }) {
     const sessionId = getStoredSessionId();
     if (sessionId) {
       track("wizard_dropoff", {
-        sessionId,
         questionIndex: activeQuestion.index,
         sectionId: activeQuestion.sectionId,
         eventType: "back",
@@ -179,7 +177,6 @@ export function WizardShell({ step }: { step: number }) {
         }
         if (event.type === "report_complete") {
           track("wizard_completed", {
-            sessionId,
             totalTimeMs: Date.now() - startedAt,
             overallScore: event.overallScore,
             tier: event.tier,
@@ -193,8 +190,7 @@ export function WizardShell({ step }: { step: number }) {
         }
         if (event.type === "error") {
           track("report_generation_failed", {
-            sessionId,
-            errorMessage: String(event.message).substring(0, 100),
+            errorType: "report_generation_failed",
             category: activeContext.category,
             stage: activeContext.stage,
             questionsAnswered: Object.keys(answers).length,
@@ -212,7 +208,7 @@ export function WizardShell({ step }: { step: number }) {
     }
 
     if (sectionCompletedWhenMovingNext()) {
-      track("section_completed", { sectionId: activeQuestion.sectionId, sessionId: getStoredSessionId() });
+      track("section_completed", { sectionId: activeQuestion.sectionId });
     }
 
     if (step === QUESTIONS.length - 1) {
