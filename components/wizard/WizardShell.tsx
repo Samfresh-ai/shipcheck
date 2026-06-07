@@ -13,7 +13,7 @@ import { QUESTIONS, SECTION_ORDER, getQuestionByIndex, type ProjectContext, type
 import type { SectionEvaluations, ScoreTier } from "@/src/lib/scoring";
 
 type LoadingState = {
-  activeSection?: SectionId;
+  activeSections: Partial<Record<SectionId, true>>;
   completed: Partial<Record<SectionId, SectionEvaluations>>;
   error?: string;
   final?: { reportId: string; overallScore: number; tier: ScoreTier };
@@ -26,7 +26,7 @@ export function WizardShell({ step }: { step: number }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [loading, setLoading] = useState<LoadingState>({ completed: {} });
+  const [loading, setLoading] = useState<LoadingState>({ activeSections: {}, completed: {} });
   const startedAt = useMemo(() => Date.now(), []);
 
   useEffect(() => {
@@ -115,7 +115,7 @@ export function WizardShell({ step }: { step: number }) {
     }
 
     setIsSubmitting(true);
-    setLoading({ completed: {} });
+    setLoading({ activeSections: {}, completed: {} });
 
     const response = await fetch("/api/reports", {
       method: "POST",
@@ -151,12 +151,17 @@ export function WizardShell({ step }: { step: number }) {
         const event = JSON.parse(line.slice(6));
 
         if (event.type === "section_start") {
-          setLoading((current) => ({ ...current, activeSection: event.sectionId }));
+          setLoading((current) => ({
+            ...current,
+            activeSections: { ...current.activeSections, [event.sectionId]: true },
+          }));
         }
         if (event.type === "section_complete") {
           setLoading((current) => ({
             ...current,
-            activeSection: undefined,
+            activeSections: Object.fromEntries(
+              Object.entries(current.activeSections).filter(([sectionId]) => sectionId !== event.sectionId),
+            ) as Partial<Record<SectionId, true>>,
             completed: { ...current.completed, [event.sectionId]: event.evaluations },
           }));
         }
@@ -212,7 +217,7 @@ export function WizardShell({ step }: { step: number }) {
             <SectionLoadingCard
               key={sectionId}
               sectionId={sectionId}
-              status={loading.completed[sectionId] ? "done" : loading.activeSection === sectionId ? "loading" : "idle"}
+              status={loading.completed[sectionId] ? "done" : loading.activeSections[sectionId] ? "loading" : "idle"}
               evaluations={loading.completed[sectionId]}
             />
           ))}

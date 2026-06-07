@@ -12,7 +12,7 @@ Built for the Mind the Product World Product Day Hackathon 2026. We ran ShipChec
 
 - Node.js 20+
 - A Supabase project
-- An OpenAI API key
+- An OpenAI API key or NVIDIA API Catalog key
 - A Novus.ai account
 - Vercel for deployment
 
@@ -34,8 +34,14 @@ If Supabase env vars are absent, the app uses a local in-memory fallback for dev
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon/public key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key, server-side only |
+| `SHIPCHECK_AI_PROVIDER` | `auto`, `openai`, or `nvidia`; default behavior prefers OpenAI, then NVIDIA |
 | `OPENAI_API_KEY` | OpenAI API key |
 | `OPENAI_EVALUATION_MODEL` | OpenAI model for evaluation, default `gpt-5-mini` |
+| `NVIDIA_API_KEY` | NVIDIA API Catalog key; `NVCF_RUN_KEY` also works |
+| `NVIDIA_BASE_URL` | NVIDIA OpenAI-compatible base URL, default `https://integrate.api.nvidia.com/v1` |
+| `NVIDIA_EVALUATION_MODEL` | NVIDIA model for evaluation, default `nvidia/nvidia-nemotron-nano-9b-v2` |
+| `NVIDIA_MAX_TOKENS` | Per-call NVIDIA output cap, default `1200`, server-clamped to `2048` |
+| `NVIDIA_TIMEOUT_MS` | NVIDIA request timeout, default `120000` |
 | `NEXT_PUBLIC_NOVUS_API_KEY` | Novus/Pendo API key |
 | `NEXT_PUBLIC_APP_URL` | Deployed app URL |
 | `SEED_REPORT_ID` | UUID of seeded sample report |
@@ -63,7 +69,7 @@ Add all env vars in Vercel project settings before deploying. The report API rou
 - Next.js 14 App Router + TypeScript
 - Tailwind CSS + IBM Plex Sans
 - Supabase PostgreSQL
-- OpenAI API, default `gpt-5-mini`, per-section evaluation streamed to the client with SSE
+- OpenAI or NVIDIA API Catalog model evaluation, per-section results streamed to the client with SSE
 - Novus.ai analytics
 - Vercel
 

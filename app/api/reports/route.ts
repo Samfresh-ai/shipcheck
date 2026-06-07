@@ -32,12 +32,28 @@ export async function POST(request: NextRequest) {
       try {
         const allEvaluations = {};
 
-        for (const sectionId of SECTION_ORDER) {
-          send({ type: "section_start", sectionId });
-          const sectionQuestions = getSectionQuestions(sectionId);
-          const evaluations = await evaluateSection(sectionId, sectionQuestions, payload.data.answers, payload.data.projectContext);
+        const sectionResults = await Promise.all(
+          SECTION_ORDER.map(async (sectionId) => {
+            send({ type: "section_start", sectionId });
+            try {
+              const sectionQuestions = getSectionQuestions(sectionId);
+              const evaluations = await evaluateSection(sectionId, sectionQuestions, payload.data.answers, payload.data.projectContext);
+              send({ type: "section_complete", sectionId, evaluations });
+              return { sectionId, evaluations, error: undefined };
+            } catch (error) {
+              return { sectionId, evaluations: undefined, error: error as Error };
+            }
+          }),
+        );
+
+        const failedSection = sectionResults.find((result) => result.error);
+        if (failedSection?.error) {
+          throw new Error(`${failedSection.sectionId} evaluation failed: ${failedSection.error.message}`);
+        }
+
+        for (const { evaluations } of sectionResults) {
+          if (!evaluations) continue;
           Object.assign(allEvaluations, evaluations);
-          send({ type: "section_complete", sectionId, evaluations });
         }
 
         const { overall, sectionScores, tier } = computeOverallScore(allEvaluations, QUESTIONS, SECTIONS);
