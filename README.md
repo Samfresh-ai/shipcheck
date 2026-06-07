@@ -2,7 +2,7 @@
 
 **Ship with intention. Not just enthusiasm.**
 
-[Try ShipCheck](https://shipcheck-three.vercel.app) | [Read the ShipCheck report on ShipCheck](https://shipcheck-three.vercel.app/report/00000000-0000-4000-8000-000000000067)
+[Try ShipCheck](https://shipcheck-three.vercel.app) | [Watch the submission presentation](https://samfresh-ai.github.io/shipcheck-demo/) | [Read the ShipCheck report on ShipCheck](https://shipcheck-three.vercel.app/report/00000000-0000-4000-8000-000000000067)
 
 ShipCheck is a pre-launch readiness tool for builders. Answer 20 sharp questions across five areas of product thinking, get honest AI feedback specific to your product type and stage, and leave with a shareable readiness report before real users tell you the hard way.
 
