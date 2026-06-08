@@ -107,32 +107,25 @@ export async function POST(request: NextRequest) {
 
       try {
         const allEvaluations = {};
-
-        let nextSectionIndex = 0;
         const sectionResults = new Array<{
           sectionId: (typeof SECTION_ORDER)[number];
           evaluations: Awaited<ReturnType<typeof evaluateSection>> | undefined;
           error: Error | undefined;
         }>(SECTION_ORDER.length);
 
-        async function worker() {
-          while (nextSectionIndex < SECTION_ORDER.length) {
-            const currentIndex = nextSectionIndex;
-            nextSectionIndex += 1;
-            const sectionId = SECTION_ORDER[currentIndex];
-            send({ type: "section_start", sectionId });
-            try {
-              const sectionQuestions = getSectionQuestions(sectionId);
-              const evaluations = await evaluateSection(sectionId, sectionQuestions, reportPayload.answers, reportPayload.projectContext);
-              send({ type: "section_complete", sectionId, evaluations });
-              sectionResults[currentIndex] = { sectionId, evaluations, error: undefined };
-            } catch (error) {
-              sectionResults[currentIndex] = { sectionId, evaluations: undefined, error: error as Error };
-            }
+        for (let index = 0; index < SECTION_ORDER.length; index += 1) {
+          const sectionId = SECTION_ORDER[index];
+          send({ type: "section_start", sectionId });
+
+          try {
+            const sectionQuestions = getSectionQuestions(sectionId);
+            const evaluations = await evaluateSection(sectionId, sectionQuestions, reportPayload.answers, reportPayload.projectContext);
+            send({ type: "section_complete", sectionId, evaluations });
+            sectionResults[index] = { sectionId, evaluations, error: undefined };
+          } catch (error) {
+            sectionResults[index] = { sectionId, evaluations: undefined, error: error as Error };
           }
         }
-
-        await Promise.all(Array.from({ length: Math.min(REPORT_SECTION_CONCURRENCY, SECTION_ORDER.length) }, () => worker()));
 
         const failedSection = sectionResults.find((result) => result.error);
         if (failedSection?.error) {
