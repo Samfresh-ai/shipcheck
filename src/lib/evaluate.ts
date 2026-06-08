@@ -61,53 +61,57 @@ function providerTimeoutFromEnv(env: NodeJS.ProcessEnv, key: string, defaultValu
   return Math.min(positiveIntegerFromEnv(env, key, defaultValue), MAX_PROVIDER_TIMEOUT_MS);
 }
 
-function resolveEvaluationProviderConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
-  const provider = configuredProvider(env);
+function openAiConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
+  if (!env.OPENAI_API_KEY) return null;
+
+  return {
+    provider: "openai",
+    apiKey: env.OPENAI_API_KEY,
+    model: env.OPENAI_EVALUATION_MODEL || DEFAULT_OPENAI_EVALUATION_MODEL,
+    timeoutMs: providerTimeoutFromEnv(env, "OPENAI_TIMEOUT_MS", DEFAULT_OPENAI_TIMEOUT_MS),
+  };
+}
+
+function nvidiaConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
   const nvidiaApiKey = env.NVIDIA_API_KEY || env.NVCF_RUN_KEY;
+  if (!nvidiaApiKey) return null;
+
+  return {
+    provider: "nvidia",
+    apiKey: nvidiaApiKey,
+    baseURL: (env.NVIDIA_BASE_URL || DEFAULT_NVIDIA_BASE_URL).replace(/\/+$/, ""),
+    model: env.NVIDIA_EVALUATION_MODEL || env.NVIDIA_MODEL || DEFAULT_NVIDIA_EVALUATION_MODEL,
+    timeoutMs: providerTimeoutFromEnv(env, "NVIDIA_TIMEOUT_MS", DEFAULT_NVIDIA_TIMEOUT_MS),
+    maxTokens: modelTokenLimitFromEnv(env, "NVIDIA_MAX_TOKENS", DEFAULT_NVIDIA_MAX_TOKENS),
+  };
+}
+
+function resolveEvaluationProviderConfigs(env: NodeJS.ProcessEnv): EvaluationProviderConfig[] {
+  const provider = configuredProvider(env);
+  const openai = openAiConfig(env);
+  const nvidia = nvidiaConfig(env);
 
   if (provider === "openai") {
-    if (!env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is required when SHIPCHECK_AI_PROVIDER=openai");
-    return {
-      provider: "openai",
-      apiKey: env.OPENAI_API_KEY,
-      model: env.OPENAI_EVALUATION_MODEL || DEFAULT_OPENAI_EVALUATION_MODEL,
-      timeoutMs: providerTimeoutFromEnv(env, "OPENAI_TIMEOUT_MS", DEFAULT_OPENAI_TIMEOUT_MS),
-    };
+    return openai ? [openai] : [];
   }
 
   if (provider === "nvidia") {
-    if (!nvidiaApiKey) throw new Error("NVIDIA_API_KEY or NVCF_RUN_KEY is required when SHIPCHECK_AI_PROVIDER=nvidia");
-    return {
-      provider: "nvidia",
-      apiKey: nvidiaApiKey,
-      baseURL: (env.NVIDIA_BASE_URL || DEFAULT_NVIDIA_BASE_URL).replace(/\/+$/, ""),
-      model: env.NVIDIA_EVALUATION_MODEL || env.NVIDIA_MODEL || DEFAULT_NVIDIA_EVALUATION_MODEL,
-      timeoutMs: providerTimeoutFromEnv(env, "NVIDIA_TIMEOUT_MS", DEFAULT_NVIDIA_TIMEOUT_MS),
-      maxTokens: modelTokenLimitFromEnv(env, "NVIDIA_MAX_TOKENS", DEFAULT_NVIDIA_MAX_TOKENS),
-    };
+    if (!nvidia) return [];
+    return openai ? [nvidia, openai] : [nvidia];
   }
 
-  if (env.OPENAI_API_KEY) {
-    return {
-      provider: "openai",
-      apiKey: env.OPENAI_API_KEY,
-      model: env.OPENAI_EVALUATION_MODEL || DEFAULT_OPENAI_EVALUATION_MODEL,
-      timeoutMs: providerTimeoutFromEnv(env, "OPENAI_TIMEOUT_MS", DEFAULT_OPENAI_TIMEOUT_MS),
-    };
+  if (provider === "auto") {
+    return [nvidia, openai].filter(Boolean) as EvaluationProviderConfig[];
   }
 
-  if (nvidiaApiKey) {
-    return {
-      provider: "nvidia",
-      apiKey: nvidiaApiKey,
-      baseURL: (env.NVIDIA_BASE_URL || DEFAULT_NVIDIA_BASE_URL).replace(/\/+$/, ""),
-      model: env.NVIDIA_EVALUATION_MODEL || env.NVIDIA_MODEL || DEFAULT_NVIDIA_EVALUATION_MODEL,
-      timeoutMs: providerTimeoutFromEnv(env, "NVIDIA_TIMEOUT_MS", DEFAULT_NVIDIA_TIMEOUT_MS),
-      maxTokens: modelTokenLimitFromEnv(env, "NVIDIA_MAX_TOKENS", DEFAULT_NVIDIA_MAX_TOKENS),
-    };
-  }
+  const providers: EvaluationProviderConfig[] = [];
+  if (openai) providers.push(openai);
+  if (nvidia) providers.push(nvidia);
+  return providers;
+}
 
-  return null;
+function resolveEvaluationProviderConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
+  return resolveEvaluationProviderConfigs(env)[0] ?? null;
 }
 
 export function evaluationProviderForEnv(env: NodeJS.ProcessEnv = process.env): PublicEvaluationProviderConfig | null {
@@ -378,24 +382,34 @@ export async function evaluateSection(
     return mockEvaluateSection(questions, answers);
   }
 
-  const config = resolveEvaluationProviderConfig(process.env);
-  if (!config) {
+  const providerConfigs = resolveEvaluationProviderConfigs(process.env);
+  if (providerConfigs.length === 0) {
     throw new Error("A live evaluation provider is required. Set OPENAI_API_KEY or NVIDIA_API_KEY.");
   }
 
-  try {
-    const text = await runModel(config, evaluationInstructions(sectionId, context), sectionPayload(questions, answers), SECTION_MAX_TOKENS);
-    if (!text) {
-      throw new Error(`${config.provider} returned an empty evaluation response`);
-    }
+  const errors: Error[] = [];
+  for (const config of providerConfigs) {
+    try {
+      const text = await runModel(config, evaluationInstructions(sectionId, context), sectionPayload(questions, answers), SECTION_MAX_TOKENS);
+      if (!text) {
+        throw new Error(`${config.provider} returned an empty evaluation response`);
+      }
 
-    const parsed = await parseEvaluationJsonResponse(text);
-    return Object.fromEntries(
-      questions.map((question) => [question.id, normalizeEvaluation(question, parsed.evaluations?.[question.id])]),
-    );
-  } catch (error) {
-    throw new Error(`Failed to evaluate section ${sectionId}: ${(error as Error).message}`);
+      const parsed = await parseEvaluationJsonResponse(text);
+      return Object.fromEntries(
+        questions.map((question) => [question.id, normalizeEvaluation(question, parsed.evaluations?.[question.id])]),
+      );
+    } catch (error) {
+      errors.push(error as Error);
+    }
   }
+
+  const lastError = errors[errors.length - 1];
+  throw new Error(
+    `Failed to evaluate section ${sectionId} after trying provider(s) ${providerConfigs
+      .map((config) => config.provider)
+      .join(", ")}: ${lastError ? lastError.message : "unknown error"}`,
+  );
 }
 
 export async function generateOverallInsight(input: {
@@ -412,23 +426,33 @@ export async function generateOverallInsight(input: {
     return deterministicOverallInsight(input);
   }
 
-  const config = resolveEvaluationProviderConfig(process.env);
-  if (!config) {
+  const providerConfigs = resolveEvaluationProviderConfigs(process.env);
+  if (providerConfigs.length === 0) {
     throw new Error("A live evaluation provider is required. Set OPENAI_API_KEY or NVIDIA_API_KEY.");
   }
 
-  const text = await runModel(
-    config,
-    "You are a product advisor. Write 2-3 direct sentences identifying the single biggest pattern across all answers. Do not repeat scores. Output plain text only.",
-    JSON.stringify({
-      product: input.context,
-      sectionScores: input.sectionScores,
-      redItems,
-    }),
-    INSIGHT_MAX_TOKENS,
-  );
+  for (const config of providerConfigs) {
+    try {
+      const text = await runModel(
+        config,
+        "You are a product advisor. Write 2-3 direct sentences identifying the single biggest pattern across all answers. Do not repeat scores. Output plain text only.",
+        JSON.stringify({
+          product: input.context,
+          sectionScores: input.sectionScores,
+          redItems,
+        }),
+        INSIGHT_MAX_TOKENS,
+      );
 
-  return text || "The report completed, but no overall insight was returned.";
+      if (text) {
+        return text;
+      }
+    } catch (error) {
+      // Try the next provider in sequence.
+    }
+  }
+
+  return "The report completed, but no overall insight was returned.";
 }
 
 export function formatSse(data: unknown): string {
