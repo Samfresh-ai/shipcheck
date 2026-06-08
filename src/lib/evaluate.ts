@@ -273,9 +273,7 @@ function resolveEvaluationProviderConfigs(env: NodeJS.ProcessEnv): EvaluationPro
 
   if (provider === "nvidia") {
     if (!nvidia) return [];
-    const providers: EvaluationProviderConfig[] = [nvidia];
-    if (openai) providers.push(openai);
-    return providers;
+    return [nvidia];
   }
 
   if (provider === "auto") {
