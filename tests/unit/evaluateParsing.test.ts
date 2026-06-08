@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { parseEvaluationJsonResponse } from "@/src/lib/evaluate";
 
 describe("parseEvaluationJsonResponse", () => {
@@ -16,15 +16,11 @@ describe("parseEvaluationJsonResponse", () => {
     });
   });
 
-  it("repairs missing commas between known evaluation properties without a model retry", async () => {
-    const repair = vi.fn();
-
+  it("repairs missing commas between known evaluation properties", async () => {
     const parsed = await parseEvaluationJsonResponse(
       '{"evaluations":{"u1":{"score":4 "tier":"RED","feedback":"The answer has a concrete user but no proof." "action":"Add one interview detail."} "u2":{"score":7,"tier":"AMBER","feedback":"Specific but thin."}}}',
-      repair,
     );
 
-    expect(repair).not.toHaveBeenCalled();
     expect(parsed.evaluations.u1).toEqual({
       score: 4,
       tier: "RED",
@@ -34,18 +30,11 @@ describe("parseEvaluationJsonResponse", () => {
     expect(parsed.evaluations.u2.tier).toBe("AMBER");
   });
 
-  it("uses the model repair fallback for malformed JSON outside the common repair pattern", async () => {
-    const repair = vi.fn().mockResolvedValue(
-      '{"evaluations":{"u1":{"score":4,"tier":"RED","feedback":"The answer has a concrete user but no proof.","action":"Add one interview detail."}}}',
-    );
-
+  it("repairs broader malformed JSON locally without a provider retry", async () => {
     const parsed = await parseEvaluationJsonResponse(
-      '{"evaluations":{"u1":{"score":4,"tier":"RED","feedback":"The answer has a concrete user but no proof.","action":"Add one interview detail.",',
-      repair,
+      "{evaluations:{u1:{score:4,tier:'RED',feedback:'The answer has a concrete user but no proof.',action:'Add one interview detail.',},},}",
     );
 
-    expect(repair).toHaveBeenCalledOnce();
-    expect(repair.mock.calls[0][1].message).toContain("Expected");
     expect(parsed.evaluations.u1).toEqual({
       score: 4,
       tier: "RED",

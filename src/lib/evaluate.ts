@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { jsonrepair } from "jsonrepair";
 import { CATEGORY_LABELS, SECTIONS, STAGE_LABELS, type ProjectContext, type Question, type SectionId } from "./questions";
 import { tierForScore, type QuestionEvaluation, type SectionEvaluations } from "./scoring";
 
@@ -28,8 +29,6 @@ const DEFAULT_NVIDIA_TIMEOUT_MS = 30_000;
 const DEFAULT_NVIDIA_MAX_TOKENS = 900;
 const MAX_MODEL_OUTPUT_TOKENS = 900;
 const MAX_PROVIDER_TIMEOUT_MS = 30_000;
-const JSON_REPAIR_TIMEOUT_MS = 8_000;
-const JSON_REPAIR_MAX_TOKENS = 900;
 
 function configuredProvider(env: NodeJS.ProcessEnv): EvaluationProvider | "auto" | undefined {
   const provider = (env.SHIPCHECK_AI_PROVIDER || env.AI_PROVIDER)?.trim().toLowerCase();
@@ -306,24 +305,7 @@ function repairCommonJsonSyntax(text: string): string {
     .replace(/([}\]])\s+(?="(?:[upsdm]\d+|score|tier|feedback|action)"\s*:)/g, "$1, ");
 }
 
-function jsonRepairInstructions(): string {
-  return `You repair malformed JSON from a product-readiness evaluator.
-Return only one valid JSON object. Preserve the original keys, scores, tiers, feedback, and actions.
-Do not add new analysis, markdown, comments, or text outside the JSON object.`;
-}
-
-function jsonRepairConfig(config: EvaluationProviderConfig): EvaluationProviderConfig {
-  return {
-    ...config,
-    timeoutMs: Math.min(config.timeoutMs ?? MAX_PROVIDER_TIMEOUT_MS, JSON_REPAIR_TIMEOUT_MS),
-    maxTokens: Math.min(config.maxTokens ?? JSON_REPAIR_MAX_TOKENS, JSON_REPAIR_MAX_TOKENS),
-  };
-}
-
-export async function parseEvaluationJsonResponse(
-  text: string,
-  repair?: (malformedJson: string, parseError: Error) => Promise<string>,
-): Promise<OpenAiEvaluationResponse> {
+export async function parseEvaluationJsonResponse(text: string): Promise<OpenAiEvaluationResponse> {
   const cleaned = cleanJsonResponse(text);
 
   try {
@@ -338,13 +320,10 @@ export async function parseEvaluationJsonResponse(
       }
     }
 
-    if (!repair) throw error;
-
-    const repaired = cleanJsonResponse(await repair(cleaned, error as Error));
     try {
-      return JSON.parse(repaired) as OpenAiEvaluationResponse;
+      return JSON.parse(jsonrepair(cleaned)) as OpenAiEvaluationResponse;
     } catch (repairError) {
-      throw new Error(`${(error as Error).message}; repair failed: ${(repairError as Error).message}`);
+      throw new Error(`${(error as Error).message}; local repair failed: ${(repairError as Error).message}`);
     }
   }
 }
@@ -409,14 +388,7 @@ export async function evaluateSection(
 
   let parsed: OpenAiEvaluationResponse;
   try {
-    parsed = await parseEvaluationJsonResponse(text, async (malformedJson, parseError) =>
-      runModel(
-        jsonRepairConfig(config),
-        jsonRepairInstructions(),
-        JSON.stringify({ parseError: parseError.message, malformedJson }),
-        JSON_REPAIR_MAX_TOKENS,
-      ),
-    );
+    parsed = await parseEvaluationJsonResponse(text);
   } catch (error) {
     throw new Error(`${config.provider} evaluation JSON parse failed: ${(error as Error).message}`);
   }
