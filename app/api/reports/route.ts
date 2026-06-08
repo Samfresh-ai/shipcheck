@@ -111,19 +111,25 @@ export async function POST(request: NextRequest) {
           evaluations: Awaited<ReturnType<typeof evaluateSection>> | undefined;
           error: Error | undefined;
         }>(SECTION_ORDER.length);
-
-        for (const sectionId of SECTION_ORDER) {
+        const sectionPromises = SECTION_ORDER.map((sectionId) => {
           const sectionQuestions = getSectionQuestions(sectionId);
+          return {
+            sectionId,
+            promise: evaluateSection(sectionId, sectionQuestions, reportPayload.answers, reportPayload.projectContext),
+          };
+        });
 
+        for (const { sectionId } of sectionPromises) {
           send({ type: "section_start", sectionId });
+        }
 
+        for (let index = 0; index < SECTION_ORDER.length; index += 1) {
+          const sectionId = SECTION_ORDER[index];
           try {
-            const evaluations = await evaluateSection(sectionId, sectionQuestions, reportPayload.answers, reportPayload.projectContext);
+            const evaluations = await sectionPromises[index].promise;
             send({ type: "section_complete", sectionId, evaluations });
-            const index = SECTION_ORDER.indexOf(sectionId);
             sectionResults[index] = { sectionId, evaluations, error: undefined };
           } catch (error) {
-            const index = SECTION_ORDER.indexOf(sectionId);
             sectionResults[index] = { sectionId, evaluations: undefined, error: error as Error };
           }
         }

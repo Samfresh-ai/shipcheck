@@ -30,13 +30,20 @@ const DEFAULT_NVIDIA_TIMEOUT_MS = 10_000;
 const DEFAULT_NVIDIA_MAX_TOKENS = 2500;
 const DEFAULT_NVIDIA_REQUESTS_PER_MINUTE = 40;
 const NVIDIA_DEFAULT_FALLBACK_MODELS = [
+  "nvidia/llama-3.1-nemotron-nano-8b-v1",
+  "nvidia/llama-3.1-nemotron-51b-instruct",
+  "nvidia/llama-3.1-nemotron-70b-instruct",
   "nvidia/llama-3.3-nemotron-super-49b-v1.5",
 ];
 const NVIDIA_LEGACY_SLOW_MODELS = new Set(["nvidia/nvidia-nemotron-nano-9b-v2"]);
+const NVIDIA_FALLBACK_PRIORITY_MODELS = [
+  "nvidia/nvidia-nemotron-nano-9b-v2",
+  ...NVIDIA_DEFAULT_FALLBACK_MODELS,
+];
 const MAX_MODEL_OUTPUT_TOKENS = 2500;
-const SECTION_MAX_TOKENS = 360;
-const INSIGHT_MAX_TOKENS = 220;
-const MAX_PROVIDER_TIMEOUT_MS = 5_000;
+const SECTION_MAX_TOKENS = 2500;
+const INSIGHT_MAX_TOKENS = 2500;
+const MAX_PROVIDER_TIMEOUT_MS = 15_000;
 const PROVIDER_RETRY_ATTEMPTS = 1;
 const PROVIDER_RETRY_BASE_MS = 800;
 const PROVIDER_RETRY_MAX_MS = 5_000;
@@ -216,21 +223,28 @@ function nvidiaModelCandidates(env: NodeJS.ProcessEnv): string[] {
     .map((value) => value.trim())
     .filter(Boolean);
   if (configuredModels.length === 0) {
-    return [...NVIDIA_DEFAULT_FALLBACK_MODELS];
+    return [...NVIDIA_FALLBACK_PRIORITY_MODELS];
   }
 
   const configuredLegacyModels = configuredModels.filter((model) => NVIDIA_LEGACY_SLOW_MODELS.has(model));
   const configuredPreferredModels = configuredModels.filter((model) => !NVIDIA_LEGACY_SLOW_MODELS.has(model));
 
   if (configuredPreferredModels.length > 0) {
-    return [...new Set([...configuredPreferredModels, ...fallbackModels, ...configuredLegacyModels])];
+    return [
+      ...new Set([
+        ...configuredPreferredModels,
+        ...fallbackModels,
+        ...NVIDIA_FALLBACK_PRIORITY_MODELS,
+        ...configuredLegacyModels,
+      ]),
+    ];
   }
 
   if (fallbackModels.length > 0) {
-    return fallbackModels;
+    return [...new Set([...fallbackModels, ...NVIDIA_FALLBACK_PRIORITY_MODELS])];
   }
 
-  return [DEFAULT_NVIDIA_EVALUATION_MODEL];
+  return [...new Set([DEFAULT_NVIDIA_EVALUATION_MODEL, ...NVIDIA_FALLBACK_PRIORITY_MODELS])];
 }
 
 function openAiConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
