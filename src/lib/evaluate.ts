@@ -189,7 +189,7 @@ function normalizeEvaluation(question: Question, evaluation: Partial<QuestionEva
 }
 
 function isMockAiEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.NODE_ENV === "test" || env.SHIPCHECK_USE_MOCK_AI === "1";
+  return env.NODE_ENV === "test";
 }
 
 async function withProviderAbort<T>(timeoutMs: number | undefined, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -394,10 +394,7 @@ export async function evaluateSection(
       questions.map((question) => [question.id, normalizeEvaluation(question, parsed.evaluations?.[question.id])]),
     );
   } catch (error) {
-    if (process.env.NODE_ENV !== "test") {
-      console.warn(`Falling back to heuristic evaluation for ${sectionId} due provider failure: ${(error as Error).message}`);
-    }
-    return mockEvaluateSection(questions, answers);
+    throw new Error(`Failed to evaluate section ${sectionId}: ${(error as Error).message}`);
   }
 }
 
@@ -417,11 +414,7 @@ export async function generateOverallInsight(input: {
 
   const config = resolveEvaluationProviderConfig(process.env);
   if (!config) {
-    return deterministicOverallInsight(input);
-  }
-
-  if (config.provider === "nvidia") {
-    return deterministicOverallInsight(input);
+    throw new Error("A live evaluation provider is required. Set OPENAI_API_KEY or NVIDIA_API_KEY.");
   }
 
   const text = await runModel(
