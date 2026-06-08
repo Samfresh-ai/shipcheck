@@ -22,13 +22,15 @@ type EvaluationProviderConfig = PublicEvaluationProviderConfig & {
 };
 
 const DEFAULT_OPENAI_EVALUATION_MODEL = "gpt-5-mini";
-const DEFAULT_OPENAI_TIMEOUT_MS = 30_000;
+const DEFAULT_OPENAI_TIMEOUT_MS = 10_000;
 const DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
 const DEFAULT_NVIDIA_EVALUATION_MODEL = "nvidia/nvidia-nemotron-nano-9b-v2";
-const DEFAULT_NVIDIA_TIMEOUT_MS = 30_000;
+const DEFAULT_NVIDIA_TIMEOUT_MS = 10_000;
 const DEFAULT_NVIDIA_MAX_TOKENS = 900;
 const MAX_MODEL_OUTPUT_TOKENS = 900;
-const MAX_PROVIDER_TIMEOUT_MS = 30_000;
+const SECTION_MAX_TOKENS = 360;
+const INSIGHT_MAX_TOKENS = 220;
+const MAX_PROVIDER_TIMEOUT_MS = 10_000;
 
 function configuredProvider(env: NodeJS.ProcessEnv): EvaluationProvider | "auto" | undefined {
   const provider = (env.SHIPCHECK_AI_PROVIDER || env.AI_PROVIDER)?.trim().toLowerCase();
@@ -381,24 +383,22 @@ export async function evaluateSection(
     throw new Error("A live evaluation provider is required. Set OPENAI_API_KEY or NVIDIA_API_KEY.");
   }
 
-  const text = await runModel(config, evaluationInstructions(sectionId, context), sectionPayload(questions, answers), 1800);
-  if (!text) {
-    throw new Error(`${config.provider} returned an empty evaluation response`);
-  }
-
-  let parsed: OpenAiEvaluationResponse;
   try {
-    parsed = await parseEvaluationJsonResponse(text);
+    const text = await runModel(config, evaluationInstructions(sectionId, context), sectionPayload(questions, answers), SECTION_MAX_TOKENS);
+    if (!text) {
+      throw new Error(`${config.provider} returned an empty evaluation response`);
+    }
+
+    const parsed = await parseEvaluationJsonResponse(text);
+    return Object.fromEntries(
+      questions.map((question) => [question.id, normalizeEvaluation(question, parsed.evaluations?.[question.id])]),
+    );
   } catch (error) {
     if (process.env.NODE_ENV !== "test") {
-      console.warn(`Falling back to heuristic evaluation for ${sectionId} due AI JSON parse failure: ${(error as Error).message}`);
+      console.warn(`Falling back to heuristic evaluation for ${sectionId} due provider failure: ${(error as Error).message}`);
     }
     return mockEvaluateSection(questions, answers);
   }
-
-  return Object.fromEntries(
-    questions.map((question) => [question.id, normalizeEvaluation(question, parsed.evaluations?.[question.id])]),
-  );
 }
 
 export async function generateOverallInsight(input: {
@@ -432,7 +432,7 @@ export async function generateOverallInsight(input: {
       sectionScores: input.sectionScores,
       redItems,
     }),
-    420,
+    INSIGHT_MAX_TOKENS,
   );
 
   return text || "The report completed, but no overall insight was returned.";
