@@ -26,7 +26,7 @@ https://shipcheck-three.vercel.app/report/00000000-0000-4000-8000-000000000067
 
 The biggest weakness ShipCheck found in itself was distribution. The report called out that naming communities is not enough; the first-10-users plan needs exact people, messages, and a sequence.
 
-The app is instrumented with Novus/Pendo so the behavior loop can be measured instead of guessed. The Devpost Novus dashboard screenshot is still the next submission artifact; until that screenshot is captured, the submission should claim live instrumentation and report generation proof, not a verified before/after drop-off metric.
+The app is instrumented with Novus/Pendo so the behavior loop can be measured instead of guessed. 
 
 ## How it works
 
