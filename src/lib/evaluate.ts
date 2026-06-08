@@ -145,6 +145,8 @@ Rules:
 - Never say "I can see you've put thought into this".
 - Be direct. Assume the builder can handle honest feedback.
 - If an answer is empty or under 10 characters, score it 0, tier RED, feedback "No substantive answer provided.", action "Answer this question fully before shipping."
+- Escape quotation marks, newlines, and control characters inside JSON string values.
+- Do not include markdown fences, comments, trailing commas, or text outside the JSON object.
 - Output only valid JSON shaped as {"evaluations":{"questionId":{"score":0,"tier":"RED","feedback":"...","action":"..."}}}.`;
 }
 
@@ -200,7 +202,7 @@ async function runNvidiaCompletion(config: EvaluationProviderConfig, instruction
         { role: "system", content: instructions },
         { role: "user", content: input },
       ],
-      temperature: 0.2,
+      temperature: 0,
       max_tokens: Math.min(config.maxTokens ?? maxTokens, maxTokens, MAX_MODEL_OUTPUT_TOKENS),
     },
     { timeout: config.timeoutMs },
@@ -271,6 +273,32 @@ function cleanJsonResponse(text: string): string {
   return stripped;
 }
 
+function jsonRepairInstructions(): string {
+  return `You repair malformed JSON from a product-readiness evaluator.
+Return only one valid JSON object. Preserve the original keys, scores, tiers, feedback, and actions.
+Do not add new analysis, markdown, comments, or text outside the JSON object.`;
+}
+
+export async function parseEvaluationJsonResponse(
+  text: string,
+  repair?: (malformedJson: string, parseError: Error) => Promise<string>,
+): Promise<OpenAiEvaluationResponse> {
+  const cleaned = cleanJsonResponse(text);
+
+  try {
+    return JSON.parse(cleaned) as OpenAiEvaluationResponse;
+  } catch (error) {
+    if (!repair) throw error;
+
+    const repaired = cleanJsonResponse(await repair(cleaned, error as Error));
+    try {
+      return JSON.parse(repaired) as OpenAiEvaluationResponse;
+    } catch (repairError) {
+      throw new Error(`${(error as Error).message}; repair failed: ${(repairError as Error).message}`);
+    }
+  }
+}
+
 function mockEvaluateSection(questions: Question[], answers: Record<string, string>): SectionEvaluations {
   return Object.fromEntries(
     questions.map((question) => {
@@ -331,7 +359,14 @@ export async function evaluateSection(
 
   let parsed: OpenAiEvaluationResponse;
   try {
-    parsed = JSON.parse(cleanJsonResponse(text)) as OpenAiEvaluationResponse;
+    parsed = await parseEvaluationJsonResponse(text, async (malformedJson, parseError) =>
+      runModel(
+        config,
+        jsonRepairInstructions(),
+        JSON.stringify({ parseError: parseError.message, malformedJson }),
+        Math.min(config.maxTokens ?? 1800, 1800),
+      ),
+    );
   } catch (error) {
     throw new Error(`${config.provider} evaluation JSON parse failed: ${(error as Error).message}`);
   }
