@@ -101,8 +101,8 @@ If Supabase env vars are absent, the app falls back to an in-memory store for lo
 | `NVIDIA_API_KEY` | NVIDIA API Catalog key; `NVCF_RUN_KEY` also works |
 | `NVIDIA_BASE_URL` | NVIDIA OpenAI-compatible base URL, default `https://integrate.api.nvidia.com/v1` |
 | `NVIDIA_EVALUATION_MODEL` | NVIDIA model for evaluation, default `nvidia/nvidia-nemotron-nano-9b-v2` |
-| `NVIDIA_MAX_TOKENS` | Per-call NVIDIA output cap, default `1200`, server-clamped to `2048` |
-| `NVIDIA_TIMEOUT_MS` | NVIDIA request timeout, default `120000` |
+| `NVIDIA_MAX_TOKENS` | Per-call NVIDIA output cap, default `900`, server-clamped to `900` |
+| `NVIDIA_TIMEOUT_MS` | NVIDIA request timeout, default `30000`, server-clamped to `30000` |
 | `NEXT_PUBLIC_NOVUS_API_KEY` | Novus/Pendo API key |
 | `NEXT_PUBLIC_APP_URL` | Deployed app URL |
 | `SEED_REPORT_ID` | UUID of the seeded sample report |

@@ -21,15 +21,15 @@ type EvaluationProviderConfig = PublicEvaluationProviderConfig & {
 };
 
 const DEFAULT_OPENAI_EVALUATION_MODEL = "gpt-5-mini";
-const DEFAULT_OPENAI_TIMEOUT_MS = 45_000;
+const DEFAULT_OPENAI_TIMEOUT_MS = 30_000;
 const DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
 const DEFAULT_NVIDIA_EVALUATION_MODEL = "nvidia/nvidia-nemotron-nano-9b-v2";
-const DEFAULT_NVIDIA_TIMEOUT_MS = 45_000;
-const DEFAULT_NVIDIA_MAX_TOKENS = 1_200;
-const MAX_MODEL_OUTPUT_TOKENS = 2_048;
-const MAX_PROVIDER_TIMEOUT_MS = 45_000;
-const JSON_REPAIR_TIMEOUT_MS = 12_000;
-const JSON_REPAIR_MAX_TOKENS = 1_200;
+const DEFAULT_NVIDIA_TIMEOUT_MS = 30_000;
+const DEFAULT_NVIDIA_MAX_TOKENS = 900;
+const MAX_MODEL_OUTPUT_TOKENS = 900;
+const MAX_PROVIDER_TIMEOUT_MS = 30_000;
+const JSON_REPAIR_TIMEOUT_MS = 8_000;
+const JSON_REPAIR_MAX_TOKENS = 900;
 
 function configuredProvider(env: NodeJS.ProcessEnv): EvaluationProvider | "auto" | undefined {
   const provider = (env.SHIPCHECK_AI_PROVIDER || env.AI_PROVIDER)?.trim().toLowerCase();
@@ -140,7 +140,7 @@ Score 0-10:
 5-7 -> AMBER: directionally right but needs sharper thinking
 0-4 -> RED: vague, assumption-based, or evasive
 
-For each answer, provide score, tier, and 2-3 sentences of specific feedback. RED items must include action: one concrete next step, maximum 15 words, starting with a verb.
+For each answer, provide score, tier, and 1-2 short sentences of specific feedback. RED items must include action: one concrete next step, maximum 15 words, starting with a verb.
 
 Rules:
 - Never use "great", "awesome", "excellent", or "good job".
@@ -191,23 +191,44 @@ function isMockAiEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.NODE_ENV === "test" || env.SHIPCHECK_USE_MOCK_AI === "1";
 }
 
+async function withProviderAbort<T>(timeoutMs: number | undefined, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  if (!timeoutMs) return run(new AbortController().signal);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await run(controller.signal);
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`provider request timed out after ${Math.round(timeoutMs / 1000)}s`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function runNvidiaCompletion(config: EvaluationProviderConfig, instructions: string, input: string, maxTokens: number): Promise<string> {
   const client = new OpenAI({
     apiKey: config.apiKey,
     baseURL: config.baseURL,
     timeout: config.timeoutMs,
   });
-  const response = await client.chat.completions.create(
-    {
-      model: config.model,
-      messages: [
-        { role: "system", content: instructions },
-        { role: "user", content: input },
-      ],
-      temperature: 0,
-      max_tokens: Math.min(config.maxTokens ?? maxTokens, maxTokens, MAX_MODEL_OUTPUT_TOKENS),
-    },
-    { timeout: config.timeoutMs },
+
+  const response = await withProviderAbort(config.timeoutMs, (signal) =>
+    client.chat.completions.create(
+      {
+        model: config.model,
+        messages: [
+          { role: "system", content: instructions },
+          { role: "user", content: input },
+        ],
+        temperature: 0,
+        max_tokens: Math.min(config.maxTokens ?? maxTokens, maxTokens, MAX_MODEL_OUTPUT_TOKENS),
+      },
+      { signal, timeout: config.timeoutMs },
+    ),
   );
 
   return response.choices[0]?.message?.content?.trim() ?? "";
@@ -215,14 +236,17 @@ async function runNvidiaCompletion(config: EvaluationProviderConfig, instruction
 
 async function runOpenAiResponse(config: EvaluationProviderConfig, instructions: string, input: string, maxTokens: number): Promise<string> {
   const client = new OpenAI({ apiKey: config.apiKey, timeout: config.timeoutMs });
-  const response = await client.responses.create(
-    {
-      model: config.model,
-      instructions,
-      input,
-      max_output_tokens: maxTokens,
-    },
-    { timeout: config.timeoutMs },
+
+  const response = await withProviderAbort(config.timeoutMs, (signal) =>
+    client.responses.create(
+      {
+        model: config.model,
+        instructions,
+        input,
+        max_output_tokens: maxTokens,
+      },
+      { signal, timeout: config.timeoutMs },
+    ),
   );
 
   return response.output_text?.trim() ?? "";
