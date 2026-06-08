@@ -31,14 +31,13 @@ const DEFAULT_NVIDIA_MAX_TOKENS = 2500;
 const DEFAULT_NVIDIA_REQUESTS_PER_MINUTE = 40;
 const NVIDIA_DEFAULT_FALLBACK_MODELS = [
   "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-  "nvidia/llama-3.3-nemotron-super-49b-v1.6",
 ];
 const NVIDIA_LEGACY_SLOW_MODELS = new Set(["nvidia/nvidia-nemotron-nano-9b-v2"]);
 const MAX_MODEL_OUTPUT_TOKENS = 2500;
 const SECTION_MAX_TOKENS = 360;
 const INSIGHT_MAX_TOKENS = 220;
-const MAX_PROVIDER_TIMEOUT_MS = 10_000;
-const PROVIDER_RETRY_ATTEMPTS = 2;
+const MAX_PROVIDER_TIMEOUT_MS = 8_000;
+const PROVIDER_RETRY_ATTEMPTS = 1;
 const PROVIDER_RETRY_BASE_MS = 800;
 const PROVIDER_RETRY_MAX_MS = 5_000;
 
@@ -178,8 +177,9 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 async function runModelWithRetry(config: EvaluationProviderConfig, instructions: string, input: string, maxTokens: number): Promise<string> {
   let attempt = 0;
   let delayMs = PROVIDER_RETRY_BASE_MS;
+  const maxAttempts = Math.max(1, PROVIDER_RETRY_ATTEMPTS);
 
-  while (true) {
+  while (attempt < maxAttempts) {
     attempt += 1;
 
     try {
@@ -187,7 +187,7 @@ async function runModelWithRetry(config: EvaluationProviderConfig, instructions:
       const effectiveTimeoutMs = Math.max(config.timeoutMs ?? MAX_PROVIDER_TIMEOUT_MS, 5_000);
       return await withTimeout(runModel(config, instructions, input, maxTokens), effectiveTimeoutMs);
     } catch (error) {
-      if (attempt > PROVIDER_RETRY_ATTEMPTS || !isRetriableProviderError(error)) {
+      if (attempt >= maxAttempts || !isRetriableProviderError(error)) {
         throw error;
       }
 
@@ -196,6 +196,8 @@ async function runModelWithRetry(config: EvaluationProviderConfig, instructions:
       delayMs = Math.min(delayMs * 2, PROVIDER_RETRY_MAX_MS);
     }
   }
+
+  throw new Error(`${config.provider} (${config.model}) request failed after ${maxAttempts} attempts`);
 }
 
 function modelTokenLimitFromEnv(env: NodeJS.ProcessEnv, key: string, defaultValue: number): number {
@@ -215,22 +217,14 @@ function nvidiaModelCandidates(env: NodeJS.ProcessEnv): string[] {
     .filter(Boolean);
   const hasKnownAlternative = fallbackModels.length > 0 || NVIDIA_DEFAULT_FALLBACK_MODELS.length > 0;
 
-  const ordered = [...configuredModels, ...fallbackModels, ...NVIDIA_DEFAULT_FALLBACK_MODELS];
-  const uniqueOrdered = [...new Set(ordered)];
+  const configuredLegacyModels = configuredModels.filter((model) => NVIDIA_LEGACY_SLOW_MODELS.has(model));
+  const configuredPreferredModels = configuredModels.filter((model) => !NVIDIA_LEGACY_SLOW_MODELS.has(model));
 
-  if (!hasKnownAlternative) return uniqueOrdered;
-
-  const legacyFirst = [];
-  const preferred = [];
-  for (const model of uniqueOrdered) {
-    if (NVIDIA_LEGACY_SLOW_MODELS.has(model)) {
-      legacyFirst.push(model);
-    } else {
-      preferred.push(model);
-    }
+  if (hasKnownAlternative) {
+    return [...new Set([...configuredPreferredModels, ...fallbackModels, ...NVIDIA_DEFAULT_FALLBACK_MODELS, ...configuredLegacyModels])];
   }
 
-  return [...preferred, ...legacyFirst];
+  return [...new Set(configuredModels)];
 }
 
 function openAiConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
@@ -607,32 +601,19 @@ export async function evaluateSection(
     const payload = sectionPayload(questions, answers);
 
     for (const model of modelCandidates) {
-      let attempt = 0;
-      let delayMs = PROVIDER_RETRY_BASE_MS;
-      while (attempt < PROVIDER_RETRY_ATTEMPTS) {
-        attempt += 1;
+      try {
+        const text = await runModelWithRetry({ ...config, model }, instructions, payload, SECTION_MAX_TOKENS);
 
-        try {
-          const text = await runModelWithRetry({ ...config, model }, instructions, payload, SECTION_MAX_TOKENS);
-
-          if (!text) {
-            throw new Error(`${config.provider} (${model}) returned an empty evaluation response`);
-          }
-
-          const parsed = await parseEvaluationJsonResponse(text);
-          return Object.fromEntries(
-            questions.map((question) => [question.id, normalizeEvaluation(question, parsed.evaluations?.[question.id])]),
-          );
-        } catch (error) {
-          errors.push(error as Error);
-
-          if (attempt >= PROVIDER_RETRY_ATTEMPTS || !isRetriableProviderError(error)) {
-            break;
-          }
-
-          await sleep(delayMs);
-          delayMs = Math.min(delayMs * 2, PROVIDER_RETRY_MAX_MS);
+        if (!text) {
+          throw new Error(`${config.provider} (${model}) returned an empty evaluation response`);
         }
+
+        const parsed = await parseEvaluationJsonResponse(text);
+        return Object.fromEntries(
+          questions.map((question) => [question.id, normalizeEvaluation(question, parsed.evaluations?.[question.id])]),
+        );
+      } catch (error) {
+        errors.push(error as Error);
       }
     }
   }
