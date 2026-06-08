@@ -299,6 +299,13 @@ function cleanJsonResponse(text: string): string {
   return stripped;
 }
 
+function repairCommonJsonSyntax(text: string): string {
+  return text
+    .replace(/"\s+(?="(?:evaluations|[upsdm]\d+|score|tier|feedback|action)"\s*:)/g, '", ')
+    .replace(/(\d)\s+(?="(?:tier|feedback|action)"\s*:)/g, "$1, ")
+    .replace(/([}\]])\s+(?="(?:[upsdm]\d+|score|tier|feedback|action)"\s*:)/g, "$1, ");
+}
+
 function jsonRepairInstructions(): string {
   return `You repair malformed JSON from a product-readiness evaluator.
 Return only one valid JSON object. Preserve the original keys, scores, tiers, feedback, and actions.
@@ -322,6 +329,15 @@ export async function parseEvaluationJsonResponse(
   try {
     return JSON.parse(cleaned) as OpenAiEvaluationResponse;
   } catch (error) {
+    const repairedSyntax = repairCommonJsonSyntax(cleaned);
+    if (repairedSyntax !== cleaned) {
+      try {
+        return JSON.parse(repairedSyntax) as OpenAiEvaluationResponse;
+      } catch {
+        // Fall through to the model repair pass with the original parse error.
+      }
+    }
+
     if (!repair) throw error;
 
     const repaired = cleanJsonResponse(await repair(cleaned, error as Error));

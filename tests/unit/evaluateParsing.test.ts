@@ -16,13 +16,31 @@ describe("parseEvaluationJsonResponse", () => {
     });
   });
 
-  it("repairs malformed model JSON once before failing the section", async () => {
+  it("repairs missing commas between known evaluation properties without a model retry", async () => {
+    const repair = vi.fn();
+
+    const parsed = await parseEvaluationJsonResponse(
+      '{"evaluations":{"u1":{"score":4 "tier":"RED","feedback":"The answer has a concrete user but no proof." "action":"Add one interview detail."} "u2":{"score":7,"tier":"AMBER","feedback":"Specific but thin."}}}',
+      repair,
+    );
+
+    expect(repair).not.toHaveBeenCalled();
+    expect(parsed.evaluations.u1).toEqual({
+      score: 4,
+      tier: "RED",
+      feedback: "The answer has a concrete user but no proof.",
+      action: "Add one interview detail.",
+    });
+    expect(parsed.evaluations.u2.tier).toBe("AMBER");
+  });
+
+  it("uses the model repair fallback for malformed JSON outside the common repair pattern", async () => {
     const repair = vi.fn().mockResolvedValue(
       '{"evaluations":{"u1":{"score":4,"tier":"RED","feedback":"The answer has a concrete user but no proof.","action":"Add one interview detail."}}}',
     );
 
     const parsed = await parseEvaluationJsonResponse(
-      '{"evaluations":{"u1":{"score":4,"tier":"RED","feedback":"The answer has a concrete user but no proof." "action":"Add one interview detail."}}}',
+      '{"evaluations":{"u1":{"score":4,"tier":"RED","feedback":"The answer has a concrete user but no proof.","action":"Add one interview detail.",',
       repair,
     );
 
