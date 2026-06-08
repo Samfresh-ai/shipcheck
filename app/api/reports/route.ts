@@ -9,7 +9,7 @@ import { countRecentReportsForSession, saveReport, sessionExists } from "@/src/l
 
 const MAX_REPORT_REQUEST_BYTES = 40_000;
 const MAX_ANSWER_CHARACTERS = 1_200;
-const REPORT_SECTION_CONCURRENCY = 2;
+const REPORT_SECTION_CONCURRENCY = SECTION_ORDER.length;
 const TRANSIENT_REPORT_LIMIT = 8;
 const TRANSIENT_REPORT_WINDOW_MS = 10 * 60 * 1000;
 const MAX_REPORTS_PER_SESSION_PER_HOUR = 4;

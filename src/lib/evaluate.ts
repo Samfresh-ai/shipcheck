@@ -28,6 +28,8 @@ const DEFAULT_NVIDIA_TIMEOUT_MS = 45_000;
 const DEFAULT_NVIDIA_MAX_TOKENS = 1_200;
 const MAX_MODEL_OUTPUT_TOKENS = 2_048;
 const MAX_PROVIDER_TIMEOUT_MS = 45_000;
+const JSON_REPAIR_TIMEOUT_MS = 12_000;
+const JSON_REPAIR_MAX_TOKENS = 1_200;
 
 function configuredProvider(env: NodeJS.ProcessEnv): EvaluationProvider | "auto" | undefined {
   const provider = (env.SHIPCHECK_AI_PROVIDER || env.AI_PROVIDER)?.trim().toLowerCase();
@@ -279,6 +281,14 @@ Return only one valid JSON object. Preserve the original keys, scores, tiers, fe
 Do not add new analysis, markdown, comments, or text outside the JSON object.`;
 }
 
+function jsonRepairConfig(config: EvaluationProviderConfig): EvaluationProviderConfig {
+  return {
+    ...config,
+    timeoutMs: Math.min(config.timeoutMs ?? MAX_PROVIDER_TIMEOUT_MS, JSON_REPAIR_TIMEOUT_MS),
+    maxTokens: Math.min(config.maxTokens ?? JSON_REPAIR_MAX_TOKENS, JSON_REPAIR_MAX_TOKENS),
+  };
+}
+
 export async function parseEvaluationJsonResponse(
   text: string,
   repair?: (malformedJson: string, parseError: Error) => Promise<string>,
@@ -361,10 +371,10 @@ export async function evaluateSection(
   try {
     parsed = await parseEvaluationJsonResponse(text, async (malformedJson, parseError) =>
       runModel(
-        config,
+        jsonRepairConfig(config),
         jsonRepairInstructions(),
         JSON.stringify({ parseError: parseError.message, malformedJson }),
-        Math.min(config.maxTokens ?? 1800, 1800),
+        JSON_REPAIR_MAX_TOKENS,
       ),
     );
   } catch (error) {

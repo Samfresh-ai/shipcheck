@@ -147,6 +147,7 @@ export function WizardShell({ step }: { step: number }) {
 
     const decoder = new TextDecoder();
     let buffer = "";
+    let reachedTerminalEvent = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -176,6 +177,7 @@ export function WizardShell({ step }: { step: number }) {
           }));
         }
         if (event.type === "report_complete") {
+          reachedTerminalEvent = true;
           track("wizard_completed", {
             totalTimeMs: Date.now() - startedAt,
             overallScore: event.overallScore,
@@ -189,6 +191,7 @@ export function WizardShell({ step }: { step: number }) {
           router.push(`/report/${event.reportId}`);
         }
         if (event.type === "error") {
+          reachedTerminalEvent = true;
           track("report_generation_failed", {
             errorType: "report_generation_failed",
             category: activeContext.category,
@@ -198,6 +201,20 @@ export function WizardShell({ step }: { step: number }) {
           setLoading((current) => ({ ...current, error: event.message }));
         }
       }
+    }
+
+    if (!reachedTerminalEvent) {
+      track("report_generation_failed", {
+        errorType: "report_stream_incomplete",
+        category: activeContext.category,
+        stage: activeContext.stage,
+        questionsAnswered: Object.keys(answers).length,
+      });
+      setLoading((current) => ({
+        ...current,
+        activeSections: {},
+        error: "Report generation stopped before completion. Try again with the same answers.",
+      }));
     }
   }
 
