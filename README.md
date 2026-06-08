@@ -2,7 +2,7 @@
 
 **Ship with intention. Not just enthusiasm.**
 
-[Try ShipCheck](https://shipcheck-three.vercel.app) | [Watch the YouTube demo](https://youtu.be/5pckm6q7qEg) | [Open the narrated presentation](https://samfresh-ai.github.io/shipcheck-demo/) | [Read the ShipCheck report on ShipCheck](https://shipcheck-three.vercel.app/report/00000000-0000-4000-8000-000000000067)
+[Try ShipCheck](https://shipcheck-three.vercel.app) | [Open the narrated presentation](https://samfresh-ai.github.io/shipcheck-demo/) | [Read the ShipCheck report on ShipCheck](https://shipcheck-three.vercel.app/report/00000000-0000-4000-8000-000000000067)
 
 ShipCheck is a pre-launch readiness tool for builders. Answer 20 sharp questions across five areas of product thinking, get honest AI feedback specific to your product type and stage, and leave with a shareable readiness report before real users tell you the hard way.
 
@@ -26,7 +26,7 @@ https://shipcheck-three.vercel.app/report/00000000-0000-4000-8000-000000000067
 
 The biggest weakness ShipCheck found in itself was distribution. The report called out that naming communities is not enough; the first-10-users plan needs exact people, messages, and a sequence.
 
-The report also captures the behavior loop ShipCheck is built around: question 12 became the pressure point, so the subtext was rewritten with a concrete example. The Devpost Novus dashboard screenshot can be updated later once the dashboard view is ready, but the app is already instrumented and the report story is live.
+The app is instrumented with Novus/Pendo so the behavior loop can be measured instead of guessed. The Devpost Novus dashboard screenshot is still the next submission artifact; until that screenshot is captured, the submission should claim live instrumentation and report generation proof, not a verified before/after drop-off metric.
 
 ## How it works
 
