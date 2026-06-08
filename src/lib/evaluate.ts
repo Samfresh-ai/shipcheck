@@ -215,16 +215,22 @@ function nvidiaModelCandidates(env: NodeJS.ProcessEnv): string[] {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
-  const hasKnownAlternative = fallbackModels.length > 0 || NVIDIA_DEFAULT_FALLBACK_MODELS.length > 0;
+  if (configuredModels.length === 0) {
+    return [...NVIDIA_DEFAULT_FALLBACK_MODELS];
+  }
 
   const configuredLegacyModels = configuredModels.filter((model) => NVIDIA_LEGACY_SLOW_MODELS.has(model));
   const configuredPreferredModels = configuredModels.filter((model) => !NVIDIA_LEGACY_SLOW_MODELS.has(model));
 
-  if (hasKnownAlternative) {
-    return [...new Set([...configuredPreferredModels, ...fallbackModels, ...NVIDIA_DEFAULT_FALLBACK_MODELS, ...configuredLegacyModels])];
+  if (configuredPreferredModels.length > 0) {
+    return [...new Set([...configuredPreferredModels, ...fallbackModels, ...configuredLegacyModels])];
   }
 
-  return [...new Set(configuredModels)];
+  if (fallbackModels.length > 0) {
+    return fallbackModels;
+  }
+
+  return [DEFAULT_NVIDIA_EVALUATION_MODEL];
 }
 
 function openAiConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
