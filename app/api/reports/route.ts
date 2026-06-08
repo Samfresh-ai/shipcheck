@@ -9,7 +9,6 @@ import { countRecentReportsForSession, saveReport, sessionExists } from "@/src/l
 
 const MAX_REPORT_REQUEST_BYTES = 40_000;
 const MAX_ANSWER_CHARACTERS = 1_200;
-const REPORT_SECTION_CONCURRENCY = SECTION_ORDER.length;
 const TRANSIENT_REPORT_LIMIT = 8;
 const TRANSIENT_REPORT_WINDOW_MS = 10 * 60 * 1000;
 const MAX_REPORTS_PER_SESSION_PER_HOUR = 4;
@@ -113,26 +112,18 @@ export async function POST(request: NextRequest) {
           error: Error | undefined;
         }>(SECTION_ORDER.length);
 
-        const sectionPromises = SECTION_ORDER.map((sectionId) => {
+        for (const sectionId of SECTION_ORDER) {
           const sectionQuestions = getSectionQuestions(sectionId);
-          return {
-            sectionId,
-            promise: evaluateSection(sectionId, sectionQuestions, reportPayload.answers, reportPayload.projectContext),
-          };
-        });
 
-        for (const { sectionId } of sectionPromises) {
           send({ type: "section_start", sectionId });
-        }
-
-        for (let index = 0; index < SECTION_ORDER.length; index += 1) {
-          const sectionId = SECTION_ORDER[index];
 
           try {
-            const evaluations = await sectionPromises[index].promise;
+            const evaluations = await evaluateSection(sectionId, sectionQuestions, reportPayload.answers, reportPayload.projectContext);
             send({ type: "section_complete", sectionId, evaluations });
+            const index = SECTION_ORDER.indexOf(sectionId);
             sectionResults[index] = { sectionId, evaluations, error: undefined };
           } catch (error) {
+            const index = SECTION_ORDER.indexOf(sectionId);
             sectionResults[index] = { sectionId, evaluations: undefined, error: error as Error };
           }
         }

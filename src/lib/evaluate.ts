@@ -221,22 +221,30 @@ async function runNvidiaCompletion(config: EvaluationProviderConfig, instruction
     timeout: config.timeoutMs,
   });
 
+  const request = {
+    model: config.model,
+    messages: [
+      { role: "system" as const, content: instructions },
+      { role: "user" as const, content: input },
+    ],
+    temperature: 0,
+  };
+
   const response = await withProviderAbort(config.timeoutMs, (signal) =>
     client.chat.completions.create(
       {
-        model: config.model,
-        messages: [
-          { role: "system", content: instructions },
-          { role: "user", content: input },
-        ],
-        temperature: 0,
-        max_tokens: Math.min(config.maxTokens ?? maxTokens, maxTokens, MAX_MODEL_OUTPUT_TOKENS),
-      },
+        ...request,
+        ...(providerSupportsMaxCompletionTokens(config.model) ? { max_completion_tokens: Math.min(config.maxTokens ?? maxTokens, maxTokens, MAX_MODEL_OUTPUT_TOKENS) } : { max_tokens: Math.min(config.maxTokens ?? maxTokens, maxTokens, MAX_MODEL_OUTPUT_TOKENS) }),
+      } as OpenAI.ChatCompletionCreateParamsNonStreaming,
       { signal, timeout: config.timeoutMs },
     ),
   );
 
   return response.choices[0]?.message?.content?.trim() ?? "";
+}
+
+function providerSupportsMaxCompletionTokens(model: string) {
+  return model.includes("nemotron");
 }
 
 async function runOpenAiResponse(config: EvaluationProviderConfig, instructions: string, input: string, maxTokens: number): Promise<string> {
