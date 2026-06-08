@@ -113,13 +113,23 @@ export async function POST(request: NextRequest) {
           error: Error | undefined;
         }>(SECTION_ORDER.length);
 
+        const sectionPromises = SECTION_ORDER.map((sectionId) => {
+          const sectionQuestions = getSectionQuestions(sectionId);
+          return {
+            sectionId,
+            promise: evaluateSection(sectionId, sectionQuestions, reportPayload.answers, reportPayload.projectContext),
+          };
+        });
+
+        for (const { sectionId } of sectionPromises) {
+          send({ type: "section_start", sectionId });
+        }
+
         for (let index = 0; index < SECTION_ORDER.length; index += 1) {
           const sectionId = SECTION_ORDER[index];
-          send({ type: "section_start", sectionId });
 
           try {
-            const sectionQuestions = getSectionQuestions(sectionId);
-            const evaluations = await evaluateSection(sectionId, sectionQuestions, reportPayload.answers, reportPayload.projectContext);
+            const evaluations = await sectionPromises[index].promise;
             send({ type: "section_complete", sectionId, evaluations });
             sectionResults[index] = { sectionId, evaluations, error: undefined };
           } catch (error) {
