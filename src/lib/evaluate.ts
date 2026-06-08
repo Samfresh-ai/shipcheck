@@ -157,6 +157,24 @@ function isRetriableProviderError(error: unknown): boolean {
   );
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(`provider request timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise
+      .then((result) => {
+        clearTimeout(timeoutId);
+        resolve(result);
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      });
+  });
+}
+
 async function runModelWithRetry(config: EvaluationProviderConfig, instructions: string, input: string, maxTokens: number): Promise<string> {
   let attempt = 0;
   let delayMs = PROVIDER_RETRY_BASE_MS;
@@ -166,7 +184,8 @@ async function runModelWithRetry(config: EvaluationProviderConfig, instructions:
 
     try {
       await applyProviderCooldown(config);
-      return await runModel(config, instructions, input, maxTokens);
+      const effectiveTimeoutMs = Math.max(config.timeoutMs ?? MAX_PROVIDER_TIMEOUT_MS, 5_000);
+      return await withTimeout(runModel(config, instructions, input, maxTokens), effectiveTimeoutMs);
     } catch (error) {
       if (attempt > PROVIDER_RETRY_ATTEMPTS || !isRetriableProviderError(error)) {
         throw error;
