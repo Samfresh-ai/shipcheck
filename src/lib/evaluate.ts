@@ -17,6 +17,7 @@ type PublicEvaluationProviderConfig = {
 
 type EvaluationProviderConfig = PublicEvaluationProviderConfig & {
   apiKey: string;
+  models?: string[];
   timeoutMs?: number;
   maxTokens?: number;
 };
@@ -24,13 +25,21 @@ type EvaluationProviderConfig = PublicEvaluationProviderConfig & {
 const DEFAULT_OPENAI_EVALUATION_MODEL = "gpt-5-mini";
 const DEFAULT_OPENAI_TIMEOUT_MS = 10_000;
 const DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
-const DEFAULT_NVIDIA_EVALUATION_MODEL = "nvidia/nvidia-nemotron-nano-9b-v2";
+const DEFAULT_NVIDIA_EVALUATION_MODEL = "nvidia/llama-3.3-nemotron-super-49b-v1.5";
 const DEFAULT_NVIDIA_TIMEOUT_MS = 10_000;
-const DEFAULT_NVIDIA_MAX_TOKENS = 900;
-const MAX_MODEL_OUTPUT_TOKENS = 900;
+const DEFAULT_NVIDIA_MAX_TOKENS = 2500;
+const DEFAULT_NVIDIA_REQUESTS_PER_MINUTE = 40;
+const NVIDIA_DEFAULT_FALLBACK_MODELS = [
+  "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+  "nvidia/llama-3.3-nemotron-super-49b-v1.6",
+];
+const MAX_MODEL_OUTPUT_TOKENS = 2500;
 const SECTION_MAX_TOKENS = 360;
 const INSIGHT_MAX_TOKENS = 220;
 const MAX_PROVIDER_TIMEOUT_MS = 10_000;
+const PROVIDER_RETRY_ATTEMPTS = 2;
+const PROVIDER_RETRY_BASE_MS = 800;
+const PROVIDER_RETRY_MAX_MS = 5_000;
 
 function configuredProvider(env: NodeJS.ProcessEnv): EvaluationProvider | "auto" | undefined {
   const provider = (env.SHIPCHECK_AI_PROVIDER || env.AI_PROVIDER)?.trim().toLowerCase();
@@ -53,12 +62,141 @@ function positiveIntegerFromEnv(env: NodeJS.ProcessEnv, key: string, defaultValu
   return parsed;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const globalForRateState = globalThis as typeof globalThis & {
+  __shipcheckProviderCalls?: Map<string, { nextAvailableAtMs: number }>;
+};
+
+function providerCallState() {
+  if (!globalForRateState.__shipcheckProviderCalls) {
+    globalForRateState.__shipcheckProviderCalls = new Map();
+  }
+
+  return globalForRateState.__shipcheckProviderCalls;
+}
+
+function providerCooldownMs(config: EvaluationProviderConfig): number {
+  if (config.provider !== "nvidia") return 0;
+  const requestsPerMinute = positiveIntegerFromEnv(process.env, "NVIDIA_MAX_REQUESTS_PER_MINUTE", DEFAULT_NVIDIA_REQUESTS_PER_MINUTE);
+  return Math.max(1, Math.ceil(60_000 / requestsPerMinute));
+}
+
+async function applyProviderCooldown(config: EvaluationProviderConfig) {
+  const cooldownMs = providerCooldownMs(config);
+  if (cooldownMs <= 0) return;
+
+  const state = providerCallState();
+  const key = `${config.provider}:${config.model}`;
+  const now = Date.now();
+  const bucket = state.get(key) ?? { nextAvailableAtMs: now };
+  const waitMs = Math.max(0, bucket.nextAvailableAtMs - now);
+
+  if (waitMs > 0) {
+    await sleep(waitMs);
+  }
+
+  bucket.nextAvailableAtMs = Date.now() + cooldownMs;
+  state.set(key, bucket);
+}
+
+function parseErrorStatus(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const maybeStatus = (error as { status?: number; statusCode?: number }).status ?? (error as { statusCode?: number }).statusCode;
+  if (typeof maybeStatus === "number") return maybeStatus;
+  return undefined;
+}
+
+function parseRetryAfterMs(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+
+  const raw = (error as { headers?: unknown }).headers ?? (error as { response?: { headers?: unknown } }).response?.headers;
+  if (!raw) return undefined;
+
+  let retryAfter: string | undefined;
+  const headers = raw as { get?: (key: string) => string | null; [key: string]: unknown };
+  const directRetryAfter = (headers as { retryAfter?: string | string[] }).retryAfter;
+  if (typeof headers.get === "function") {
+    retryAfter = headers.get("retry-after") ?? headers.get("Retry-After") ?? (typeof directRetryAfter === "string" ? directRetryAfter : undefined);
+    if (Array.isArray(directRetryAfter)) {
+      retryAfter = directRetryAfter[0];
+    }
+  } else {
+    if (typeof raw === "string") {
+      retryAfter = raw;
+    } else if (Array.isArray(raw)) {
+      retryAfter = raw[0];
+    }
+  }
+
+  if (!retryAfter) return undefined;
+
+  const seconds = Number.parseInt(Array.isArray(retryAfter) ? retryAfter[0] : retryAfter, 10);
+  if (Number.isNaN(seconds) || seconds < 1) return undefined;
+  return seconds * 1000;
+}
+
+function isRetriableProviderError(error: unknown): boolean {
+  const status = parseErrorStatus(error);
+  if (status === 429 || status === 500 || status === 502 || status === 503 || status === 504) {
+    return true;
+  }
+
+  const message = typeof error === "object" && error !== null ? String((error as { message?: string }).message ?? "").toLowerCase() : "";
+  return (
+    message.includes("timeout") ||
+    message.includes("timed out") ||
+    message.includes("rate limit") ||
+    message.includes("rate-limit") ||
+    message.includes("too many requests") ||
+    message.includes("empty evaluation response") ||
+    message.includes("json")
+  );
+}
+
+async function runModelWithRetry(config: EvaluationProviderConfig, instructions: string, input: string, maxTokens: number): Promise<string> {
+  let attempt = 0;
+  let delayMs = PROVIDER_RETRY_BASE_MS;
+
+  while (true) {
+    attempt += 1;
+
+    try {
+      await applyProviderCooldown(config);
+      return await runModel(config, instructions, input, maxTokens);
+    } catch (error) {
+      if (attempt > PROVIDER_RETRY_ATTEMPTS || !isRetriableProviderError(error)) {
+        throw error;
+      }
+
+      const retryAfterMs = parseRetryAfterMs(error);
+      await sleep(retryAfterMs ? Math.min(retryAfterMs, PROVIDER_RETRY_MAX_MS) : delayMs);
+      delayMs = Math.min(delayMs * 2, PROVIDER_RETRY_MAX_MS);
+    }
+  }
+}
+
 function modelTokenLimitFromEnv(env: NodeJS.ProcessEnv, key: string, defaultValue: number): number {
   return Math.min(positiveIntegerFromEnv(env, key, defaultValue), MAX_MODEL_OUTPUT_TOKENS);
 }
 
 function providerTimeoutFromEnv(env: NodeJS.ProcessEnv, key: string, defaultValue: number): number {
   return Math.min(positiveIntegerFromEnv(env, key, defaultValue), MAX_PROVIDER_TIMEOUT_MS);
+}
+
+function nvidiaModelCandidates(env: NodeJS.ProcessEnv): string[] {
+  const configured = env.NVIDIA_EVALUATION_MODEL || env.NVIDIA_MODEL;
+  const configuredModels = configured ? configured.split(",").map((value) => value.trim()).filter(Boolean) : [];
+  const fallbackModels = (env.NVIDIA_MODEL_FALLBACKS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  const ordered = [...configuredModels, ...fallbackModels, ...NVIDIA_DEFAULT_FALLBACK_MODELS];
+
+  return [...new Set(ordered)];
 }
 
 function openAiConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
@@ -68,6 +206,7 @@ function openAiConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
     provider: "openai",
     apiKey: env.OPENAI_API_KEY,
     model: env.OPENAI_EVALUATION_MODEL || DEFAULT_OPENAI_EVALUATION_MODEL,
+    models: [env.OPENAI_EVALUATION_MODEL || DEFAULT_OPENAI_EVALUATION_MODEL],
     timeoutMs: providerTimeoutFromEnv(env, "OPENAI_TIMEOUT_MS", DEFAULT_OPENAI_TIMEOUT_MS),
   };
 }
@@ -75,12 +214,15 @@ function openAiConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
 function nvidiaConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
   const nvidiaApiKey = env.NVIDIA_API_KEY || env.NVCF_RUN_KEY;
   if (!nvidiaApiKey) return null;
+  const models = nvidiaModelCandidates(env);
+  if (models.length === 0) return null;
 
   return {
     provider: "nvidia",
     apiKey: nvidiaApiKey,
     baseURL: (env.NVIDIA_BASE_URL || DEFAULT_NVIDIA_BASE_URL).replace(/\/+$/, ""),
-    model: env.NVIDIA_EVALUATION_MODEL || env.NVIDIA_MODEL || DEFAULT_NVIDIA_EVALUATION_MODEL,
+    models,
+    model: models[0],
     timeoutMs: providerTimeoutFromEnv(env, "NVIDIA_TIMEOUT_MS", DEFAULT_NVIDIA_TIMEOUT_MS),
     maxTokens: modelTokenLimitFromEnv(env, "NVIDIA_MAX_TOKENS", DEFAULT_NVIDIA_MAX_TOKENS),
   };
@@ -97,7 +239,9 @@ function resolveEvaluationProviderConfigs(env: NodeJS.ProcessEnv): EvaluationPro
 
   if (provider === "nvidia") {
     if (!nvidia) return [];
-    return [nvidia];
+    const providers: EvaluationProviderConfig[] = [nvidia];
+    if (openai) providers.push(openai);
+    return providers;
   }
 
   if (provider === "auto") {
@@ -240,7 +384,34 @@ async function runNvidiaCompletion(config: EvaluationProviderConfig, instruction
     ),
   );
 
-  return response.choices[0]?.message?.content?.trim() ?? "";
+  const firstChoice = response.choices[0] as
+    | {
+        message?: { content?: string | null };
+        text?: string | null;
+      }
+    | undefined;
+  const chatOutput = (firstChoice?.message?.content ?? firstChoice?.text ?? "").trim();
+  if (chatOutput) return chatOutput;
+
+  try {
+    const responseOutput = await withProviderAbort(config.timeoutMs, (signal) =>
+      client.responses.create(
+        {
+          model: config.model,
+          input,
+          instructions,
+          max_output_tokens: Math.min(config.maxTokens ?? maxTokens, maxTokens, MAX_MODEL_OUTPUT_TOKENS),
+        } as never,
+        { signal, timeout: config.timeoutMs },
+      ),
+    );
+    const rawOutput = responseOutput.output_text?.trim();
+    if (rawOutput) return rawOutput;
+  } catch {
+    // Fall through to legacy empty response path.
+  }
+
+  return "";
 }
 
 function providerSupportsMaxCompletionTokens(model: string) {
@@ -397,18 +568,38 @@ export async function evaluateSection(
 
   const errors: Error[] = [];
   for (const config of providerConfigs) {
-    try {
-      const text = await runModel(config, evaluationInstructions(sectionId, context), sectionPayload(questions, answers), SECTION_MAX_TOKENS);
-      if (!text) {
-        throw new Error(`${config.provider} returned an empty evaluation response`);
-      }
+    const modelCandidates = config.models?.length ? config.models : [config.model];
+    const instructions = evaluationInstructions(sectionId, context);
+    const payload = sectionPayload(questions, answers);
 
-      const parsed = await parseEvaluationJsonResponse(text);
-      return Object.fromEntries(
-        questions.map((question) => [question.id, normalizeEvaluation(question, parsed.evaluations?.[question.id])]),
-      );
-    } catch (error) {
-      errors.push(error as Error);
+    for (const model of modelCandidates) {
+      let attempt = 0;
+      let delayMs = PROVIDER_RETRY_BASE_MS;
+      while (attempt < PROVIDER_RETRY_ATTEMPTS) {
+        attempt += 1;
+
+        try {
+          const text = await runModelWithRetry({ ...config, model }, instructions, payload, SECTION_MAX_TOKENS);
+
+          if (!text) {
+            throw new Error(`${config.provider} (${model}) returned an empty evaluation response`);
+          }
+
+          const parsed = await parseEvaluationJsonResponse(text);
+          return Object.fromEntries(
+            questions.map((question) => [question.id, normalizeEvaluation(question, parsed.evaluations?.[question.id])]),
+          );
+        } catch (error) {
+          errors.push(error as Error);
+
+          if (attempt >= PROVIDER_RETRY_ATTEMPTS || !isRetriableProviderError(error)) {
+            break;
+          }
+
+          await sleep(delayMs);
+          delayMs = Math.min(delayMs * 2, PROVIDER_RETRY_MAX_MS);
+        }
+      }
     }
   }
 
@@ -440,23 +631,26 @@ export async function generateOverallInsight(input: {
   }
 
   for (const config of providerConfigs) {
-    try {
-      const text = await runModel(
-        config,
-        "You are a product advisor. Write 2-3 direct sentences identifying the single biggest pattern across all answers. Do not repeat scores. Output plain text only.",
-        JSON.stringify({
-          product: input.context,
-          sectionScores: input.sectionScores,
-          redItems,
-        }),
-        INSIGHT_MAX_TOKENS,
-      );
+    const modelCandidates = config.models?.length ? config.models : [config.model];
+    for (const model of modelCandidates) {
+      try {
+        const text = await runModel(
+          { ...config, model },
+          "You are a product advisor. Write 2-3 direct sentences identifying the single biggest pattern across all answers. Do not repeat scores. Output plain text only.",
+          JSON.stringify({
+            product: input.context,
+            sectionScores: input.sectionScores,
+            redItems,
+          }),
+          INSIGHT_MAX_TOKENS,
+        );
 
-      if (text) {
-        return text;
+        if (text) {
+          return text;
+        }
+      } catch (error) {
+        // Try the next model in this provider, then the next provider.
       }
-    } catch (error) {
-      // Try the next provider in sequence.
     }
   }
 
