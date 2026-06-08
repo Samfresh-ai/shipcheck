@@ -33,6 +33,7 @@ const NVIDIA_DEFAULT_FALLBACK_MODELS = [
   "nvidia/llama-3.3-nemotron-super-49b-v1.5",
   "nvidia/llama-3.3-nemotron-super-49b-v1.6",
 ];
+const NVIDIA_LEGACY_SLOW_MODELS = new Set(["nvidia/nvidia-nemotron-nano-9b-v2"]);
 const MAX_MODEL_OUTPUT_TOKENS = 2500;
 const SECTION_MAX_TOKENS = 360;
 const INSIGHT_MAX_TOKENS = 220;
@@ -193,10 +194,24 @@ function nvidiaModelCandidates(env: NodeJS.ProcessEnv): string[] {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
+  const hasKnownAlternative = fallbackModels.length > 0 || NVIDIA_DEFAULT_FALLBACK_MODELS.length > 0;
 
   const ordered = [...configuredModels, ...fallbackModels, ...NVIDIA_DEFAULT_FALLBACK_MODELS];
+  const uniqueOrdered = [...new Set(ordered)];
 
-  return [...new Set(ordered)];
+  if (!hasKnownAlternative) return uniqueOrdered;
+
+  const legacyFirst = [];
+  const preferred = [];
+  for (const model of uniqueOrdered) {
+    if (NVIDIA_LEGACY_SLOW_MODELS.has(model)) {
+      legacyFirst.push(model);
+    } else {
+      preferred.push(model);
+    }
+  }
+
+  return [...preferred, ...legacyFirst];
 }
 
 function openAiConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
