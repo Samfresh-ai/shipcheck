@@ -288,6 +288,21 @@ function resolveEvaluationProviderConfigs(env: NodeJS.ProcessEnv): EvaluationPro
   return providers;
 }
 
+function resolveEvaluationProviderConfigsWithFallback(env: NodeJS.ProcessEnv): EvaluationProviderConfig[] {
+  const provider = configuredProvider(env);
+  if (provider !== "nvidia") {
+    return resolveEvaluationProviderConfigs(env);
+  }
+
+  const nvidia = nvidiaConfig(env);
+  const openai = openAiConfig(env);
+  if (!nvidia || !openai) {
+    return resolveEvaluationProviderConfigs(env);
+  }
+
+  return [nvidia, openai];
+}
+
 function resolveEvaluationProviderConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
   return resolveEvaluationProviderConfigs(env)[0] ?? null;
 }
@@ -595,7 +610,7 @@ export async function evaluateSection(
     return mockEvaluateSection(questions, answers);
   }
 
-  const providerConfigs = resolveEvaluationProviderConfigs(process.env);
+  const providerConfigs = resolveEvaluationProviderConfigsWithFallback(process.env);
   if (providerConfigs.length === 0) {
     throw new Error("A live evaluation provider is required. Set OPENAI_API_KEY or NVIDIA_API_KEY.");
   }
@@ -646,7 +661,7 @@ export async function generateOverallInsight(input: {
     return deterministicOverallInsight(input);
   }
 
-  const providerConfigs = resolveEvaluationProviderConfigs(process.env);
+  const providerConfigs = resolveEvaluationProviderConfigsWithFallback(process.env);
   if (providerConfigs.length === 0) {
     throw new Error("A live evaluation provider is required. Set OPENAI_API_KEY or NVIDIA_API_KEY.");
   }
