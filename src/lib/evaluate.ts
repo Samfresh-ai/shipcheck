@@ -32,8 +32,8 @@ const DEFAULT_NVIDIA_REQUESTS_PER_MINUTE = 40;
 const DEFAULT_NVIDIA_MODEL_ATTEMPTS = 2;
 const MAX_NVIDIA_MODEL_ATTEMPTS = 2;
 const NVIDIA_FALLBACK_PRIORITY_MODELS = [
+  "nvidia/nvidia-nemotron-nano-9b-v2",
   "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-  "nvidia/llama-3.1-nemotron-51b-instruct",
 ];
 const MAX_MODEL_OUTPUT_TOKENS = 2500;
 const SECTION_MAX_TOKENS = 2500;
