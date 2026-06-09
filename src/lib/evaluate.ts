@@ -229,10 +229,10 @@ function nvidiaModelCandidates(env: NodeJS.ProcessEnv): string[] {
   const attemptLimit = nvidiaModelAttemptLimit(env);
 
   if (configuredModels.length === 0) {
-  return dedupeAndTrim([...NVIDIA_FALLBACK_PRIORITY_MODELS, ...fallbackModels], attemptLimit);
+    return dedupeAndTrim([...NVIDIA_FALLBACK_PRIORITY_MODELS, ...fallbackModels], attemptLimit);
   }
 
-  return dedupeAndTrim([...configuredModels, ...fallbackModels, ...NVIDIA_FALLBACK_PRIORITY_MODELS], attemptLimit);
+  return dedupeAndTrim([...configuredModels, ...fallbackModels, ...NVIDIA_FALLBACK_PRIORITY_MODELS], configuredModels.length > 0 ? 20 : attemptLimit);
 }
 
 function openAiConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
