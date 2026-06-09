@@ -26,7 +26,7 @@ const DEFAULT_OPENAI_EVALUATION_MODEL = "gpt-5-mini";
 const DEFAULT_OPENAI_TIMEOUT_MS = 10_000;
 const DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
 const DEFAULT_NVIDIA_EVALUATION_MODEL = "nvidia/llama-3.3-nemotron-super-49b-v1.5";
-const DEFAULT_NVIDIA_TIMEOUT_MS = 10_000;
+const DEFAULT_NVIDIA_TIMEOUT_MS = 30_000;
 const DEFAULT_NVIDIA_MAX_TOKENS = 2500;
 const DEFAULT_NVIDIA_REQUESTS_PER_MINUTE = 40;
 const DEFAULT_NVIDIA_MODEL_ATTEMPTS = 2;
@@ -38,7 +38,7 @@ const NVIDIA_FALLBACK_PRIORITY_MODELS = [
 const MAX_MODEL_OUTPUT_TOKENS = 2500;
 const SECTION_MAX_TOKENS = 2500;
 const INSIGHT_MAX_TOKENS = 2500;
-const MAX_PROVIDER_TIMEOUT_MS = 15_000;
+const MAX_PROVIDER_TIMEOUT_MS = 30_000;
 const PROVIDER_RETRY_ATTEMPTS = 1;
 const PROVIDER_RETRY_BASE_MS = 800;
 const PROVIDER_RETRY_MAX_MS = 5_000;
@@ -259,7 +259,7 @@ function nvidiaConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
     baseURL: (env.NVIDIA_BASE_URL || DEFAULT_NVIDIA_BASE_URL).replace(/\/+$/, ""),
     models,
     model: models[0],
-    timeoutMs: providerTimeoutFromEnv(env, "NVIDIA_TIMEOUT_MS", DEFAULT_NVIDIA_TIMEOUT_MS),
+    timeoutMs: Math.max(providerTimeoutFromEnv(env, "NVIDIA_TIMEOUT_MS", DEFAULT_NVIDIA_TIMEOUT_MS), DEFAULT_NVIDIA_TIMEOUT_MS),
     maxTokens: modelTokenLimitFromEnv(env, "NVIDIA_MAX_TOKENS", DEFAULT_NVIDIA_MAX_TOKENS),
   };
 }
