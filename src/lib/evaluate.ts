@@ -26,19 +26,15 @@ const DEFAULT_OPENAI_EVALUATION_MODEL = "gpt-5-mini";
 const DEFAULT_OPENAI_TIMEOUT_MS = 10_000;
 const DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
 const DEFAULT_NVIDIA_EVALUATION_MODEL = "nvidia/llama-3.3-nemotron-super-49b-v1.5";
+const DEFAULT_NVIDIA_EVALUATION_FAST_MODEL = "nvidia/llama-3.1-nemotron-nano-8b-v1";
 const DEFAULT_NVIDIA_TIMEOUT_MS = 10_000;
 const DEFAULT_NVIDIA_MAX_TOKENS = 2500;
 const DEFAULT_NVIDIA_REQUESTS_PER_MINUTE = 40;
-const NVIDIA_DEFAULT_FALLBACK_MODELS = [
-  "nvidia/llama-3.1-nemotron-nano-8b-v1",
-  "nvidia/llama-3.1-nemotron-51b-instruct",
-  "nvidia/llama-3.1-nemotron-70b-instruct",
-  "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-];
-const NVIDIA_LEGACY_SLOW_MODELS = new Set(["nvidia/nvidia-nemotron-nano-9b-v2"]);
+const DEFAULT_NVIDIA_MODEL_ATTEMPTS = 2;
+const MAX_NVIDIA_MODEL_ATTEMPTS = 2;
 const NVIDIA_FALLBACK_PRIORITY_MODELS = [
-  "nvidia/nvidia-nemotron-nano-9b-v2",
-  ...NVIDIA_DEFAULT_FALLBACK_MODELS,
+  DEFAULT_NVIDIA_EVALUATION_FAST_MODEL,
+  DEFAULT_NVIDIA_EVALUATION_MODEL,
 ];
 const MAX_MODEL_OUTPUT_TOKENS = 2500;
 const SECTION_MAX_TOKENS = 2500;
@@ -215,6 +211,18 @@ function providerTimeoutFromEnv(env: NodeJS.ProcessEnv, key: string, defaultValu
   return Math.min(positiveIntegerFromEnv(env, key, defaultValue), MAX_PROVIDER_TIMEOUT_MS);
 }
 
+function nvidiaModelAttemptLimit(env: NodeJS.ProcessEnv): number {
+  return Math.min(
+    Math.max(1, positiveIntegerFromEnv(env, "NVIDIA_MODEL_ATTEMPT_LIMIT", DEFAULT_NVIDIA_MODEL_ATTEMPTS)),
+    MAX_NVIDIA_MODEL_ATTEMPTS,
+  );
+}
+
+function dedupeAndTrim(values: string[], limit: number): string[] {
+  const cleaned = values.map((value) => value.trim()).filter(Boolean);
+  return [...new Set(cleaned)].slice(0, limit);
+}
+
 function nvidiaModelCandidates(env: NodeJS.ProcessEnv): string[] {
   const configured = env.NVIDIA_EVALUATION_MODEL || env.NVIDIA_MODEL;
   const configuredModels = configured ? configured.split(",").map((value) => value.trim()).filter(Boolean) : [];
@@ -222,29 +230,13 @@ function nvidiaModelCandidates(env: NodeJS.ProcessEnv): string[] {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
+  const attemptLimit = nvidiaModelAttemptLimit(env);
+
   if (configuredModels.length === 0) {
-    return [...NVIDIA_FALLBACK_PRIORITY_MODELS];
+    return dedupeAndTrim([...NVIDIA_FALLBACK_PRIORITY_MODELS, ...fallbackModels], attemptLimit);
   }
 
-  const configuredLegacyModels = configuredModels.filter((model) => NVIDIA_LEGACY_SLOW_MODELS.has(model));
-  const configuredPreferredModels = configuredModels.filter((model) => !NVIDIA_LEGACY_SLOW_MODELS.has(model));
-
-  if (configuredPreferredModels.length > 0) {
-    return [
-      ...new Set([
-        ...configuredPreferredModels,
-        ...fallbackModels,
-        ...NVIDIA_FALLBACK_PRIORITY_MODELS,
-        ...configuredLegacyModels,
-      ]),
-    ];
-  }
-
-  if (fallbackModels.length > 0) {
-    return [...new Set([...fallbackModels, ...NVIDIA_FALLBACK_PRIORITY_MODELS])];
-  }
-
-  return [...new Set([DEFAULT_NVIDIA_EVALUATION_MODEL, ...NVIDIA_FALLBACK_PRIORITY_MODELS])];
+  return dedupeAndTrim([...configuredModels, ...fallbackModels], attemptLimit);
 }
 
 function openAiConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
