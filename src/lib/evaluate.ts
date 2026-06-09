@@ -212,10 +212,7 @@ function providerTimeoutFromEnv(env: NodeJS.ProcessEnv, key: string, defaultValu
 }
 
 function nvidiaModelAttemptLimit(env: NodeJS.ProcessEnv): number {
-  return Math.min(
-    Math.max(1, positiveIntegerFromEnv(env, "NVIDIA_MODEL_ATTEMPT_LIMIT", DEFAULT_NVIDIA_MODEL_ATTEMPTS)),
-    MAX_NVIDIA_MODEL_ATTEMPTS,
-  );
+  return MAX_NVIDIA_MODEL_ATTEMPTS;
 }
 
 function dedupeAndTrim(values: string[], limit: number): string[] {
