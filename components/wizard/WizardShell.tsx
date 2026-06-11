@@ -8,6 +8,7 @@ import { ProgressBar } from "@/components/wizard/ProgressBar";
 import { QuestionCard } from "@/components/wizard/QuestionCard";
 import { SectionLoadingCard } from "@/components/wizard/SectionLoadingCard";
 import { SectionTransition } from "@/components/wizard/SectionTransition";
+import { answerLimitLabel, MAX_ANSWER_CHARACTERS, MIN_ANSWER_CHARACTERS } from "@/src/lib/answer-limits";
 import { getStoredSessionId, track } from "@/src/lib/analytics";
 import { QUESTIONS, SECTION_ORDER, getQuestionByIndex, type ProjectContext, type SectionId } from "@/src/lib/questions";
 import type { SectionEvaluations, ScoreTier } from "@/src/lib/scoring";
@@ -119,6 +120,10 @@ export function WizardShell({ step }: { step: number }) {
     return nextQuestion && nextQuestion.sectionId !== activeQuestion.sectionId;
   }
 
+  function oversizedSavedAnswer() {
+    return QUESTIONS.find((item) => (answers[item.id] ?? "").trim().length > MAX_ANSWER_CHARACTERS);
+  }
+
   async function goBack() {
     const sessionId = getStoredSessionId();
     if (sessionId) {
@@ -140,6 +145,13 @@ export function WizardShell({ step }: { step: number }) {
     const sessionId = getStoredSessionId();
     if (!sessionId) {
       setError("Session is still starting. Try again in a second.");
+      return;
+    }
+
+    const oversizedAnswer = oversizedSavedAnswer();
+    if (oversizedAnswer) {
+      setError(`Question ${oversizedAnswer.index + 1} is too long. Keep it under ${answerLimitLabel()} characters.`);
+      router.push(`/check/${oversizedAnswer.index}`);
       return;
     }
 
@@ -239,8 +251,13 @@ export function WizardShell({ step }: { step: number }) {
   }
 
   async function goNext() {
-    if (answer.trim().length < 20) {
-      setError("Answer with at least 20 characters before moving on.");
+    if (answer.trim().length < MIN_ANSWER_CHARACTERS) {
+      setError(`Answer with at least ${MIN_ANSWER_CHARACTERS} characters before moving on.`);
+      return;
+    }
+
+    if (answer.trim().length > MAX_ANSWER_CHARACTERS) {
+      setError(`Keep this answer under ${answerLimitLabel()} characters before moving on.`);
       return;
     }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { Textarea } from "@/components/ui/Textarea";
+import { MAX_ANSWER_CHARACTERS } from "@/src/lib/answer-limits";
 import type { Question } from "@/src/lib/questions";
 import { track } from "@/src/lib/analytics";
 
@@ -24,6 +25,7 @@ export function QuestionCard({
         <Textarea
           value={answer}
           placeholder={question.placeholder}
+          maxLength={MAX_ANSWER_CHARACTERS}
           onChange={(event) => onAnswer(event.target.value)}
           onBlur={() =>
             track("question_answered", {

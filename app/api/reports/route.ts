@@ -1,14 +1,14 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { evaluateSection, formatSse, generateOverallInsight } from "@/src/lib/evaluate";
+import { answerLimitLabel, MAX_ANSWER_CHARACTERS, MIN_ANSWER_CHARACTERS } from "@/src/lib/answer-limits";
 import { projectContextSchema } from "@/src/lib/project-context";
 import { QUESTIONS, SECTIONS, SECTION_ORDER, getSectionQuestions } from "@/src/lib/questions";
 import { clientIpFromHeaders, consumeRateLimitSlot, hashIp, parseBoundedJsonRequest } from "@/src/lib/request-security";
 import { computeOverallScore } from "@/src/lib/scoring";
 import { countRecentReportsForSession, saveReport, sessionExists } from "@/src/lib/supabase";
 
-const MAX_REPORT_REQUEST_BYTES = 40_000;
-const MAX_ANSWER_CHARACTERS = 1_200;
+const MAX_REPORT_REQUEST_BYTES = 80_000;
 const TRANSIENT_REPORT_LIMIT = 8;
 const TRANSIENT_REPORT_WINDOW_MS = 10 * 60 * 1000;
 const MAX_REPORTS_PER_SESSION_PER_HOUR = 4;
@@ -26,7 +26,32 @@ function sseError(message: string, status: number, extraHeaders?: Record<string,
   });
 }
 
-const answersSchema = z.record(z.string().min(1), z.string().trim().min(20).max(MAX_ANSWER_CHARACTERS)).superRefine((answers, context) => {
+function questionLabelFromIssue(issue: z.core.$ZodIssue) {
+  const questionId = typeof issue.path[1] === "string" ? issue.path[1] : undefined;
+  const question = questionId ? QUESTIONS.find((item) => item.id === questionId) : undefined;
+  return question ? `Question ${question.index + 1}` : "One answer";
+}
+
+function reportValidationMessage(error: z.ZodError) {
+  const answerLengthIssue = error.issues.find(
+    (issue) => issue.path[0] === "answers" && (issue.code === "too_big" || issue.code === "too_small"),
+  );
+
+  if (answerLengthIssue?.code === "too_big") {
+    return `${questionLabelFromIssue(answerLengthIssue)} is too long. Keep each answer to ${answerLimitLabel()} characters or less.`;
+  }
+
+  if (answerLengthIssue?.code === "too_small") {
+    return `${questionLabelFromIssue(answerLengthIssue)} needs at least ${MIN_ANSWER_CHARACTERS} characters.`;
+  }
+
+  const customIssue = error.issues.find((issue) => issue.code === "custom");
+  return customIssue?.message ?? "Report request is invalid. Check the saved setup and answers, then try again.";
+}
+
+const answersSchema = z
+  .record(z.string().min(1), z.string().trim().min(MIN_ANSWER_CHARACTERS).max(MAX_ANSWER_CHARACTERS))
+  .superRefine((answers, context) => {
   const answerIds = Object.keys(answers);
   const unknownIds = answerIds.filter((id) => !EXPECTED_QUESTION_IDS.has(id));
   const missingIds = QUESTIONS.map((question) => question.id).filter((id) => !(id in answers));
@@ -44,7 +69,7 @@ const answersSchema = z.record(z.string().min(1), z.string().trim().min(20).max(
       message: `Missing answer ids: ${missingIds.join(", ")}`,
     });
   }
-});
+  });
 
 const reportRequestSchema = z.object({
   sessionId: z.string().uuid(),
@@ -65,7 +90,7 @@ export async function POST(request: NextRequest) {
   const payload = reportRequestSchema.safeParse(body.data);
 
   if (!payload.success) {
-    return sseError(payload.error.message, 400);
+    return sseError(reportValidationMessage(payload.error), 400);
   }
 
   const reportPayload = payload.data;

@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { GET } from "@/app/api/reports/[id]/route";
 import { POST as createSession } from "@/app/api/sessions/route";
 import { POST } from "@/app/api/reports/route";
+import { MAX_ANSWER_CHARACTERS } from "@/src/lib/answer-limits";
 import { QUESTIONS } from "@/src/lib/questions";
 import { jsonRequest, readSse } from "./helpers";
 
@@ -45,6 +46,29 @@ describe("reports API", () => {
     expect(saved.projectContext.productName).toBe("ShipCheck");
   });
 
+  it("accepts detailed answers beyond the old short draft limit", async () => {
+    const validSessionId = await sessionId();
+    const detailedAnswers = { ...answers, d1: "Distribution proof. ".repeat(90) };
+    const response = await POST(
+      jsonRequest("/api/reports", {
+        sessionId: validSessionId,
+        projectName: "ShipCheck",
+        projectContext: {
+          productName: "ShipCheck",
+          category: "developer_tool",
+          stage: "mvp_launched",
+          oneLiner: "A product readiness check.",
+        },
+        answers: detailedAnswers,
+      }),
+    );
+    const events = await readSse(response);
+
+    expect(response.status).toBe(200);
+    expect(detailedAnswers.d1.length).toBeGreaterThan(1_200);
+    expect(events.some((event) => event.type === "report_complete")).toBe(true);
+  });
+
   it("returns an SSE error for invalid payloads", async () => {
     const response = await POST(jsonRequest("/api/reports", { bad: true }));
     expect(response.status).toBe(400);
@@ -71,7 +95,7 @@ describe("reports API", () => {
     await expect(readSse(response)).resolves.toEqual([{ type: "error", message: "Session expired. Reload the page and try again." }]);
   });
 
-  it("rejects missing, unknown, or oversized answers", async () => {
+  it("rejects missing or unknown answers", async () => {
     const validSessionId = await sessionId();
     const response = await POST(
       jsonRequest("/api/reports", {
@@ -83,7 +107,7 @@ describe("reports API", () => {
           stage: "mvp_launched",
           oneLiner: "A product readiness check.",
         },
-        answers: { ...answers, unexpected: "This answer should not be accepted.", d1: "x".repeat(1_201) },
+        answers: { ...answers, unexpected: "This answer should not be accepted." },
       }),
     );
 
@@ -92,11 +116,35 @@ describe("reports API", () => {
     expect(events[0].message).toContain("Unexpected answer ids");
   });
 
+  it("rejects oversized answers with a user-safe message", async () => {
+    const validSessionId = await sessionId();
+    const response = await POST(
+      jsonRequest("/api/reports", {
+        sessionId: validSessionId,
+        projectName: "ShipCheck",
+        projectContext: {
+          productName: "ShipCheck",
+          category: "developer_tool",
+          stage: "mvp_launched",
+          oneLiner: "A product readiness check.",
+        },
+        answers: { ...answers, d1: "x".repeat(MAX_ANSWER_CHARACTERS + 1) },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    const events = await readSse(response);
+    expect(events[0]).toEqual({
+      type: "error",
+      message: "Question 15 is too long. Keep each answer to 2,400 characters or less.",
+    });
+  });
+
   it("rejects oversized request bodies", async () => {
     const response = await POST(
       new NextRequest("http://localhost:3000/api/reports", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Content-Length": "40001" },
+        headers: { "Content-Type": "application/json", "Content-Length": "80001" },
         body: "{}",
       }),
     );
