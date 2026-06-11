@@ -42,6 +42,12 @@ const MAX_PROVIDER_TIMEOUT_MS = 45_000;
 const PROVIDER_RETRY_ATTEMPTS = 1;
 const PROVIDER_RETRY_BASE_MS = 800;
 const PROVIDER_RETRY_MAX_MS = 5_000;
+const EMPTY_ANSWER_FEEDBACK = "No substantive answer provided.";
+const EMPTY_ANSWER_ACTION = "Answer this question fully before shipping.";
+const PROOF_ACTION = "Add the exact user proof or behavior this answer depends on.";
+const EMPTY_ANSWER_LANGUAGE =
+  /\b(no substantive answer|no answer provided|answer not provided|empty answer|missing answer|did not answer|does not answer|no response provided)\b/i;
+const GENERIC_EMPTY_ACTION = /\b(answer this question|provide an answer|respond to this question|fill this out)\b/i;
 
 function configuredProvider(env: NodeJS.ProcessEnv): EvaluationProvider | "auto" | undefined {
   const provider = (env.SHIPCHECK_AI_PROVIDER || env.AI_PROVIDER)?.trim().toLowerCase();
@@ -311,6 +317,7 @@ function evaluationInstructions(sectionId: SectionId, context: ProjectContext): 
   const section = SECTIONS[sectionId];
   return `You are a brutally honest product advisor evaluating ONE SECTION of a builder's pre-launch readiness check.
 Your job is not to be encouraging. Your job is to find the real weaknesses in their thinking so they can fix them before shipping.
+Your feedback should feel like a serious launch review: grounded in the answer, emotionally sharp, and specific enough to make the builder act.
 
 Product being evaluated:
 - Name: ${context.productName}
@@ -335,6 +342,10 @@ Rules:
 - Never say "I can see you've put thought into this".
 - Be direct. Assume the builder can handle honest feedback.
 - If an answer is empty or under 10 characters, score it 0, tier RED, feedback "No substantive answer provided.", action "Answer this question fully before shipping."
+- If an answer is not empty, never call it missing, empty, or "No substantive answer provided."
+- For every non-empty answer, cite or paraphrase one concrete detail from the answer before judging it.
+- Feedback must say what the answer proves, what it still fails to prove, and why that matters before launch.
+- Do not invent evidence. If the answer claims interviews, usage, quotes, revenue, retention, or a channel, evaluate that exact claim.
 - Escape quotation marks, newlines, and control characters inside JSON string values.
 - Do not include markdown fences, comments, trailing commas, or text outside the JSON object.
 - Output only valid JSON shaped as {"evaluations":{"questionId":{"score":0,"tier":"RED","feedback":"...","action":"..."}}}.`;
@@ -353,22 +364,72 @@ function sectionPayload(questions: Question[], answers: Record<string, string>):
   );
 }
 
-function normalizeEvaluation(question: Question, evaluation: Partial<QuestionEvaluation> | undefined): QuestionEvaluation {
-  const score = Math.max(0, Math.min(10, Math.round(Number(evaluation?.score ?? 0))));
-  const tier = evaluation?.tier && ["RED", "AMBER", "GREEN"].includes(evaluation.tier) ? evaluation.tier : tierForScore(score);
-  const feedback = typeof evaluation?.feedback === "string" && evaluation.feedback.trim()
-    ? evaluation.feedback.trim()
-    : "No substantive answer provided.";
+function cleanAnswerText(answer: string): string {
+  return answer
+    .replace(/[*_`>#]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isSubstantiveAnswer(answer: string): boolean {
+  const cleaned = cleanAnswerText(answer);
+  const words = cleaned.match(/[A-Za-z0-9]+/g) ?? [];
+  return cleaned.length >= 10 && words.length >= 2;
+}
+
+function answerExcerpt(answer: string): string {
+  const words = cleanAnswerText(answer).split(" ").filter(Boolean).slice(0, 18);
+  const excerpt = words.join(" ");
+  return excerpt.length > 120 ? `${excerpt.slice(0, 117)}...` : excerpt;
+}
+
+function hasEmptyAnswerLanguage(value: string | undefined): boolean {
+  return typeof value === "string" && EMPTY_ANSWER_LANGUAGE.test(value);
+}
+
+function meaningfulScore(evaluation: Partial<QuestionEvaluation> | undefined, hasSubstantiveAnswer: boolean): number {
+  if (!hasSubstantiveAnswer) return 0;
+
+  const parsedScore = Number(evaluation?.score);
+  if (!Number.isFinite(parsedScore)) return 4;
+
+  const score = Math.max(0, Math.min(10, Math.round(parsedScore)));
+  return score === 0 ? 2 : score;
+}
+
+function substantiveFallbackFeedback(answer: string): string {
+  return `The strongest signal here is "${answerExcerpt(answer)}". The gap is proof: name the observed behavior, quote, or decision this changes before trusting it at launch.`;
+}
+
+function groundedFeedback(evaluation: Partial<QuestionEvaluation> | undefined, answer: string, hasSubstantiveAnswer: boolean): string {
+  const feedback = typeof evaluation?.feedback === "string" ? evaluation.feedback.trim() : "";
+  if (!hasSubstantiveAnswer) return EMPTY_ANSWER_FEEDBACK;
+  if (!feedback || hasEmptyAnswerLanguage(feedback)) return substantiveFallbackFeedback(answer);
+  return feedback;
+}
+
+function redAction(evaluation: Partial<QuestionEvaluation> | undefined, hasSubstantiveAnswer: boolean): string {
+  const action = typeof evaluation?.action === "string" ? evaluation.action.trim() : "";
+  if (!hasSubstantiveAnswer) return EMPTY_ANSWER_ACTION;
+  if (!action || hasEmptyAnswerLanguage(action) || GENERIC_EMPTY_ACTION.test(action)) return PROOF_ACTION;
+  return action;
+}
+
+export function normalizeEvaluation(
+  evaluation: Partial<QuestionEvaluation> | undefined,
+  answer: string,
+): QuestionEvaluation {
+  const hasSubstance = isSubstantiveAnswer(answer);
+  const score = meaningfulScore(evaluation, hasSubstance);
+  const tier = tierForScore(score);
+  const feedback = groundedFeedback(evaluation, answer, hasSubstance);
   const normalized: QuestionEvaluation = { score, tier, feedback };
 
   if (tier === "RED") {
-    normalized.action =
-      typeof evaluation?.action === "string" && evaluation.action.trim()
-        ? evaluation.action.trim()
-        : "Answer this question fully before shipping.";
+    normalized.action = redAction(evaluation, hasSubstance);
   }
 
-  if ((question.id && question) && tier !== "RED") {
+  if (tier !== "RED") {
     delete normalized.action;
   }
 
@@ -617,7 +678,7 @@ export async function evaluateSection(
 
         const parsed = await parseEvaluationJsonResponse(text);
         return Object.fromEntries(
-          questions.map((question) => [question.id, normalizeEvaluation(question, parsed.evaluations?.[question.id])]),
+          questions.map((question) => [question.id, normalizeEvaluation(parsed.evaluations?.[question.id], answers[question.id] ?? "")]),
         );
       } catch (error) {
         errors.push(error as Error);
