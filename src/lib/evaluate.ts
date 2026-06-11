@@ -379,7 +379,7 @@ function isSubstantiveAnswer(answer: string): boolean {
 
 function answerExcerpt(answer: string): string {
   const words = cleanAnswerText(answer).split(" ").filter(Boolean).slice(0, 18);
-  const excerpt = words.join(" ");
+  const excerpt = words.join(" ").replace(/[,.!?:;]+$/, "");
   return excerpt.length > 120 ? `${excerpt.slice(0, 117)}...` : excerpt;
 }
 
