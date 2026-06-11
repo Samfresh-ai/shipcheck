@@ -8,9 +8,10 @@ export const metadata: Metadata = {
   description: "Answer one sharp product readiness question at a time.",
 };
 
-export default function WizardStepPage({ params }: { params: { step: string } }) {
-  const isStepNumber = /^-?\d+$/.test(params.step);
-  const step = Number.parseInt(params.step, 10);
+export default async function WizardStepPage({ params }: { params: Promise<{ step: string }> }) {
+  const { step: stepParam } = await params;
+  const isStepNumber = /^-?\d+$/.test(stepParam);
+  const step = Number.parseInt(stepParam, 10);
 
   if (!isStepNumber || Number.isNaN(step) || step < 0 || step >= QUESTIONS.length) {
     redirect("/check");

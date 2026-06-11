@@ -39,7 +39,7 @@ describe("reports API", () => {
     expect(complete.overallScore).toBeGreaterThan(0);
     expect(complete.tier).toBeTruthy();
 
-    const getResponse = await GET(jsonRequest(`/api/reports/${complete.reportId}`), { params: { id: complete.reportId } });
+    const getResponse = await GET(jsonRequest(`/api/reports/${complete.reportId}`), { params: Promise.resolve({ id: complete.reportId }) });
     expect(getResponse.status).toBe(200);
     const saved = await getResponse.json();
     expect(saved.projectContext.productName).toBe("ShipCheck");
@@ -106,7 +106,7 @@ describe("reports API", () => {
   });
 
   it("returns 404 for unknown public reports", async () => {
-    const response = await GET(jsonRequest("/api/reports/missing"), { params: { id: "missing" } });
+    const response = await GET(jsonRequest("/api/reports/missing"), { params: Promise.resolve({ id: "missing" }) });
     expect(response.status).toBe(404);
   });
 });

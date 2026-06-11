@@ -95,14 +95,14 @@ If Supabase env vars are absent, the app falls back to an in-memory store for lo
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon/public key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key, server-side only |
-| `SHIPCHECK_AI_PROVIDER` | `auto`, `openai`, or `nvidia`; default behavior prefers OpenAI, then NVIDIA |
+| `SHIPCHECK_AI_PROVIDER` | `auto`, `openai`, or `nvidia`; default behavior prefers OpenAI first, then NVIDIA |
 | `OPENAI_API_KEY` | OpenAI API key |
 | `OPENAI_EVALUATION_MODEL` | OpenAI model for evaluation, default `gpt-5-mini` |
 | `NVIDIA_API_KEY` | NVIDIA API Catalog key; `NVCF_RUN_KEY` also works |
 | `NVIDIA_BASE_URL` | NVIDIA OpenAI-compatible base URL, default `https://integrate.api.nvidia.com/v1` |
-| `NVIDIA_EVALUATION_MODEL` | NVIDIA model for evaluation, default `nvidia/nvidia-nemotron-nano-9b-v2` |
-| `NVIDIA_MAX_TOKENS` | Per-call NVIDIA output cap, default `900`, server-clamped to `900` |
-| `NVIDIA_TIMEOUT_MS` | NVIDIA request timeout, default `30000`, server-clamped to `30000` |
+| `NVIDIA_EVALUATION_MODEL` | Comma-separated NVIDIA model list for evaluation, default `nvidia/nvidia-nemotron-nano-9b-v2` |
+| `NVIDIA_MAX_TOKENS` | Per-call NVIDIA output cap, default `2500`, server-capped to `2500` |
+| `NVIDIA_TIMEOUT_MS` | NVIDIA request timeout, default `30000`, server-capped to `45000`; lower values are honored |
 | `NEXT_PUBLIC_NOVUS_API_KEY` | Novus/Pendo API key |
 | `NEXT_PUBLIC_APP_URL` | Deployed app URL |
 | `SEED_REPORT_ID` | UUID of the seeded sample report |

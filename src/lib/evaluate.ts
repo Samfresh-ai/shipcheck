@@ -25,14 +25,14 @@ type EvaluationProviderConfig = PublicEvaluationProviderConfig & {
 const DEFAULT_OPENAI_EVALUATION_MODEL = "gpt-5-mini";
 const DEFAULT_OPENAI_TIMEOUT_MS = 10_000;
 const DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
-const DEFAULT_NVIDIA_EVALUATION_MODEL = "nvidia/llama-3.3-nemotron-super-49b-v1.5";
-const DEFAULT_NVIDIA_TIMEOUT_MS = 45_000;
+const DEFAULT_NVIDIA_EVALUATION_MODEL = "nvidia/nvidia-nemotron-nano-9b-v2";
+const DEFAULT_NVIDIA_TIMEOUT_MS = 30_000;
 const DEFAULT_NVIDIA_MAX_TOKENS = 2500;
 const DEFAULT_NVIDIA_REQUESTS_PER_MINUTE = 40;
 const DEFAULT_NVIDIA_MODEL_ATTEMPTS = 2;
 const MAX_NVIDIA_MODEL_ATTEMPTS = 2;
 const NVIDIA_FALLBACK_PRIORITY_MODELS = [
-  "nvidia/nvidia-nemotron-nano-9b-v2",
+  DEFAULT_NVIDIA_EVALUATION_MODEL,
   "nvidia/llama-3.3-nemotron-super-49b-v1.5",
 ];
 const MAX_MODEL_OUTPUT_TOKENS = 2500;
@@ -211,7 +211,11 @@ function providerTimeoutFromEnv(env: NodeJS.ProcessEnv, key: string, defaultValu
 }
 
 function nvidiaModelAttemptLimit(env: NodeJS.ProcessEnv): number {
-  return MAX_NVIDIA_MODEL_ATTEMPTS;
+  const configured = env.NVIDIA_MODEL_ATTEMPTS;
+  if (!configured) return DEFAULT_NVIDIA_MODEL_ATTEMPTS;
+
+  const parsed = positiveIntegerFromEnv(env, "NVIDIA_MODEL_ATTEMPTS", DEFAULT_NVIDIA_MODEL_ATTEMPTS);
+  return Math.min(parsed, MAX_NVIDIA_MODEL_ATTEMPTS);
 }
 
 function dedupeAndTrim(values: string[], limit: number): string[] {
@@ -232,7 +236,8 @@ function nvidiaModelCandidates(env: NodeJS.ProcessEnv): string[] {
     return dedupeAndTrim([...NVIDIA_FALLBACK_PRIORITY_MODELS, ...fallbackModels], attemptLimit);
   }
 
-  return dedupeAndTrim([...configuredModels, ...fallbackModels, ...NVIDIA_FALLBACK_PRIORITY_MODELS], configuredModels.length > 0 ? 20 : attemptLimit);
+  const requestedModels = configuredModels.slice(0, attemptLimit);
+  return dedupeAndTrim([...requestedModels, ...fallbackModels, ...NVIDIA_FALLBACK_PRIORITY_MODELS], attemptLimit);
 }
 
 function openAiConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
@@ -259,7 +264,7 @@ function nvidiaConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
     baseURL: (env.NVIDIA_BASE_URL || DEFAULT_NVIDIA_BASE_URL).replace(/\/+$/, ""),
     models,
     model: models[0],
-    timeoutMs: Math.max(providerTimeoutFromEnv(env, "NVIDIA_TIMEOUT_MS", DEFAULT_NVIDIA_TIMEOUT_MS), DEFAULT_NVIDIA_TIMEOUT_MS),
+    timeoutMs: providerTimeoutFromEnv(env, "NVIDIA_TIMEOUT_MS", DEFAULT_NVIDIA_TIMEOUT_MS),
     maxTokens: modelTokenLimitFromEnv(env, "NVIDIA_MAX_TOKENS", DEFAULT_NVIDIA_MAX_TOKENS),
   };
 }
@@ -279,28 +284,13 @@ function resolveEvaluationProviderConfigs(env: NodeJS.ProcessEnv): EvaluationPro
   }
 
   if (provider === "auto") {
-    return [nvidia, openai].filter(Boolean) as EvaluationProviderConfig[];
+    return [openai, nvidia].filter(Boolean) as EvaluationProviderConfig[];
   }
 
   const providers: EvaluationProviderConfig[] = [];
-  if (nvidia) providers.push(nvidia);
   if (openai) providers.push(openai);
+  if (nvidia) providers.push(nvidia);
   return providers;
-}
-
-function resolveEvaluationProviderConfigsWithFallback(env: NodeJS.ProcessEnv): EvaluationProviderConfig[] {
-  const provider = configuredProvider(env);
-  if (provider !== "nvidia") {
-    return resolveEvaluationProviderConfigs(env);
-  }
-
-  const nvidia = nvidiaConfig(env);
-  const openai = openAiConfig(env);
-  if (!nvidia || !openai) {
-    return resolveEvaluationProviderConfigs(env);
-  }
-
-  return [nvidia, openai];
 }
 
 function resolveEvaluationProviderConfig(env: NodeJS.ProcessEnv): EvaluationProviderConfig | null {
@@ -408,63 +398,59 @@ async function withProviderAbort<T>(timeoutMs: number | undefined, run: (signal:
 }
 
 async function runNvidiaCompletion(config: EvaluationProviderConfig, instructions: string, input: string, maxTokens: number): Promise<string> {
-  const client = new OpenAI({
-    apiKey: config.apiKey,
-    baseURL: config.baseURL,
-    timeout: config.timeoutMs,
-  });
-
-  const request = {
-    model: config.model,
-    messages: [
-      { role: "system" as const, content: instructions },
-      { role: "user" as const, content: input },
-    ],
-    temperature: 0,
+  type NvidiaChatResponse = {
+    choices?: Array<{
+      message?: { content?: string | null };
+      text?: string | null;
+    }>;
+    error?: { message?: string };
   };
 
-  const response = await withProviderAbort(config.timeoutMs, (signal) =>
-    client.chat.completions.create(
-      {
-        ...request,
-        ...(providerSupportsMaxCompletionTokens(config.model) ? { max_completion_tokens: Math.min(config.maxTokens ?? maxTokens, maxTokens, MAX_MODEL_OUTPUT_TOKENS) } : { max_tokens: Math.min(config.maxTokens ?? maxTokens, maxTokens, MAX_MODEL_OUTPUT_TOKENS) }),
-      } as OpenAI.ChatCompletionCreateParamsNonStreaming,
-      { signal, timeout: config.timeoutMs },
-    ),
-  );
+  const response = await withProviderAbort(config.timeoutMs, async (signal) => {
+    const result = await fetch(`${config.baseURL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: [
+          { role: "system", content: instructions },
+          { role: "user", content: input },
+        ],
+        temperature: 0,
+        max_tokens: Math.min(config.maxTokens ?? maxTokens, maxTokens, MAX_MODEL_OUTPUT_TOKENS),
+      }),
+      signal,
+    });
 
-  const firstChoice = response.choices[0] as
-    | {
-        message?: { content?: string | null };
-        text?: string | null;
-      }
-    | undefined;
-  const chatOutput = (firstChoice?.message?.content ?? firstChoice?.text ?? "").trim();
+    const rawText = await result.text();
+    let parsed: NvidiaChatResponse | null = null;
+    try {
+      parsed = JSON.parse(rawText) as NvidiaChatResponse;
+    } catch {
+      // Preserve the raw response in the error below.
+    }
+
+    if (!result.ok) {
+      const message = parsed?.error?.message ?? (rawText.slice(0, 300) || result.statusText);
+      const error = new Error(`nvidia (${config.model}) request failed with ${result.status}: ${message}`) as Error & { status?: number };
+      error.status = result.status;
+      throw error;
+    }
+
+    return parsed;
+  });
+
+  const chatOutput = (response?.choices?.[0]?.message?.content ?? response?.choices?.[0]?.text ?? "").trim();
   if (chatOutput) return chatOutput;
 
-  try {
-    const responseOutput = await withProviderAbort(config.timeoutMs, (signal) =>
-      client.responses.create(
-        {
-          model: config.model,
-          input,
-          instructions,
-          max_output_tokens: Math.min(config.maxTokens ?? maxTokens, maxTokens, MAX_MODEL_OUTPUT_TOKENS),
-        } as never,
-        { signal, timeout: config.timeoutMs },
-      ),
-    );
-    const rawOutput = responseOutput.output_text?.trim();
-    if (rawOutput) return rawOutput;
-  } catch {
-    // Fall through to legacy empty response path.
+  if (response?.error?.message) {
+    throw new Error(`nvidia (${config.model}) returned an error: ${response.error.message}`);
   }
 
   return "";
-}
-
-function providerSupportsMaxCompletionTokens(model: string) {
-  return model.includes("nemotron");
 }
 
 async function runOpenAiResponse(config: EvaluationProviderConfig, instructions: string, input: string, maxTokens: number): Promise<string> {
@@ -610,7 +596,7 @@ export async function evaluateSection(
     return mockEvaluateSection(questions, answers);
   }
 
-  const providerConfigs = resolveEvaluationProviderConfigsWithFallback(process.env);
+  const providerConfigs = resolveEvaluationProviderConfigs(process.env);
   if (providerConfigs.length === 0) {
     throw new Error("A live evaluation provider is required. Set OPENAI_API_KEY or NVIDIA_API_KEY.");
   }
@@ -661,7 +647,7 @@ export async function generateOverallInsight(input: {
     return deterministicOverallInsight(input);
   }
 
-  const providerConfigs = resolveEvaluationProviderConfigsWithFallback(process.env);
+  const providerConfigs = resolveEvaluationProviderConfigs(process.env);
   if (providerConfigs.length === 0) {
     throw new Error("A live evaluation provider is required. Set OPENAI_API_KEY or NVIDIA_API_KEY.");
   }
@@ -684,7 +670,7 @@ export async function generateOverallInsight(input: {
         if (text) {
           return text;
         }
-      } catch (error) {
+      } catch {
         // Try the next model in this provider, then the next provider.
       }
     }

@@ -105,43 +105,14 @@ export async function POST(request: NextRequest) {
       const send = (event: unknown) => controller.enqueue(encoder.encode(formatSse(event)));
 
       try {
-        const allEvaluations = {};
-        const sectionResults = new Array<{
-          sectionId: (typeof SECTION_ORDER)[number];
-          evaluations: Awaited<ReturnType<typeof evaluateSection>> | undefined;
-          error: Error | undefined;
-        }>(SECTION_ORDER.length);
-        const sectionPromises = SECTION_ORDER.map((sectionId) => {
+        const allEvaluations: Awaited<ReturnType<typeof evaluateSection>> = {};
+
+        for (const sectionId of SECTION_ORDER) {
           const sectionQuestions = getSectionQuestions(sectionId);
-          return {
-            sectionId,
-            promise: evaluateSection(sectionId, sectionQuestions, reportPayload.answers, reportPayload.projectContext),
-          };
-        });
-
-        for (const { sectionId } of sectionPromises) {
           send({ type: "section_start", sectionId });
-        }
-
-        for (let index = 0; index < SECTION_ORDER.length; index += 1) {
-          const sectionId = SECTION_ORDER[index];
-          try {
-            const evaluations = await sectionPromises[index].promise;
-            send({ type: "section_complete", sectionId, evaluations });
-            sectionResults[index] = { sectionId, evaluations, error: undefined };
-          } catch (error) {
-            sectionResults[index] = { sectionId, evaluations: undefined, error: error as Error };
-          }
-        }
-
-        const failedSection = sectionResults.find((result) => result.error);
-        if (failedSection?.error) {
-          throw new Error(`${failedSection.sectionId} evaluation failed: ${failedSection.error.message}`);
-        }
-
-        for (const { evaluations } of sectionResults) {
-          if (!evaluations) continue;
+          const evaluations = await evaluateSection(sectionId, sectionQuestions, reportPayload.answers, reportPayload.projectContext);
           Object.assign(allEvaluations, evaluations);
+          send({ type: "section_complete", sectionId, evaluations });
         }
 
         const { overall, sectionScores, tier } = computeOverallScore(allEvaluations, QUESTIONS, SECTIONS);

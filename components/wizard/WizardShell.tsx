@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
@@ -19,27 +19,46 @@ type LoadingState = {
   final?: { reportId: string; overallScore: number; tier: ScoreTier };
 };
 
+function storedProjectContext(): ProjectContext | null {
+  if (typeof window === "undefined") return null;
+
+  const storedContext = window.localStorage.getItem("shipcheck_context");
+  if (!storedContext) return null;
+
+  try {
+    return JSON.parse(storedContext) as ProjectContext;
+  } catch {
+    return null;
+  }
+}
+
+function storedWizardAnswers(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+
+  const storedAnswers = window.localStorage.getItem("shipcheck_answers");
+  if (!storedAnswers) return {};
+
+  try {
+    return JSON.parse(storedAnswers) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
 export function WizardShell({ step }: { step: number }) {
   const router = useRouter();
   const question = getQuestionByIndex(step);
-  const [context, setContext] = useState<ProjectContext | null>(null);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [context] = useState<ProjectContext | null>(storedProjectContext);
+  const [answers, setAnswers] = useState<Record<string, string>>(storedWizardAnswers);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loading, setLoading] = useState<LoadingState>({ activeSections: {}, completed: {} });
-  const startedAt = useMemo(() => Date.now(), []);
 
   useEffect(() => {
-    const storedContext = window.localStorage.getItem("shipcheck_context");
-    if (!storedContext) {
+    if (!context) {
       router.replace("/check");
-      return;
     }
-    setContext(JSON.parse(storedContext) as ProjectContext);
-
-    const storedAnswers = window.localStorage.getItem("shipcheck_answers");
-    if (storedAnswers) setAnswers(JSON.parse(storedAnswers));
-  }, [router]);
+  }, [context, router]);
 
   useEffect(() => {
     if (step === 0 && context) {
@@ -126,6 +145,7 @@ export function WizardShell({ step }: { step: number }) {
 
     setIsSubmitting(true);
     setLoading({ activeSections: {}, completed: {} });
+    const startedAt = Date.now();
 
     const response = await fetch("/api/reports", {
       method: "POST",

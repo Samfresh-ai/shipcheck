@@ -8,7 +8,7 @@ describe("evaluationProviderForEnv", () => {
         OPENAI_API_KEY: "openai-key",
         NVIDIA_API_KEY: "nvidia-key",
       }),
-    ).toEqual({ provider: "nvidia", model: "nvidia/llama-3.3-nemotron-super-49b-v1.5", baseURL: "https://integrate.api.nvidia.com/v1" });
+    ).toEqual({ provider: "openai", model: "gpt-5-mini" });
   });
 
   it("falls through to NVIDIA when only NVIDIA is configured", () => {
@@ -16,16 +16,16 @@ describe("evaluationProviderForEnv", () => {
       evaluationProviderForEnv({
         NVIDIA_API_KEY: "nvidia-key",
         NVIDIA_BASE_URL: "https://integrate.api.nvidia.com/v1/",
-        NVIDIA_EVALUATION_MODEL: "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+        NVIDIA_EVALUATION_MODEL: "nvidia/nvidia-nemotron-nano-9b-v2",
       }),
     ).toEqual({
       provider: "nvidia",
       baseURL: "https://integrate.api.nvidia.com/v1",
-      model: "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+      model: "nvidia/nvidia-nemotron-nano-9b-v2",
     });
   });
 
-  it("falls back from NVIDIA to OpenAI when NVIDIA is forced and OpenAI is configured", () => {
+  it("keeps forced NVIDIA on NVIDIA when OpenAI is also configured", () => {
     expect(
       evaluationProviderForEnv({
         SHIPCHECK_AI_PROVIDER: "nvidia",

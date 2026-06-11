@@ -10,8 +10,9 @@ import { getPublicReport } from "@/src/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-export async function generateMetadata({ params }: { params: { id: string } }): Promise<Metadata> {
-  const report = await getPublicReport(params.id);
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const report = await getPublicReport(id);
   return {
     title: report ? `${report.projectName} Report` : "Report",
     description: report
@@ -22,8 +23,9 @@ export async function generateMetadata({ params }: { params: { id: string } }): 
 
 const rank = { RED: 0, AMBER: 1, GREEN: 2 };
 
-export default async function ReportPage({ params }: { params: { id: string } }) {
-  const report = await getPublicReport(params.id);
+export default async function ReportPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const report = await getPublicReport(id);
   if (!report) notFound();
 
   const cards = Object.entries(report.aiFeedback)

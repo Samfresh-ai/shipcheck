@@ -22,21 +22,36 @@ const defaultState: SetupState = {
   stage: "building",
 };
 
+function storedSetupState(): SetupState {
+  if (typeof window === "undefined") return defaultState;
+
+  const stored = window.localStorage.getItem("shipcheck_context");
+  if (!stored) return defaultState;
+
+  try {
+    return { ...defaultState, ...(JSON.parse(stored) as Partial<SetupState>) };
+  } catch {
+    return defaultState;
+  }
+}
+
 export function ProjectSetupForm() {
   const router = useRouter();
-  const [state, setState] = useState<SetupState>(defaultState);
+  const [state, setState] = useState<SetupState>(storedSetupState);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const stored = window.localStorage.getItem("shipcheck_context");
-    if (stored) {
+    try {
+      const stored = window.localStorage.getItem("shipcheck_context");
+      if (!stored) return;
       const previous = JSON.parse(stored) as Partial<SetupState>;
-      setState({ ...defaultState, ...previous });
       track("assessment_restarted", {
         previousCategory: previous.category ?? "unknown",
         previousStage: previous.stage ?? "unknown",
         isReturningUser: true,
       });
+    } catch {
+      // Ignore stale localStorage from older builds.
     }
   }, []);
 
