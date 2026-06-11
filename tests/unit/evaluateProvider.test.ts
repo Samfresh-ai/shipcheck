@@ -25,6 +25,18 @@ describe("evaluationProviderForEnv", () => {
     });
   });
 
+  it("uses the fast NVIDIA JSON-capable model by default", () => {
+    expect(
+      evaluationProviderForEnv({
+        NVIDIA_API_KEY: "nvidia-key",
+      }),
+    ).toEqual({
+      provider: "nvidia",
+      baseURL: "https://integrate.api.nvidia.com/v1",
+      model: "meta/llama-3.1-8b-instruct",
+    });
+  });
+
   it("keeps forced NVIDIA on NVIDIA when OpenAI is also configured", () => {
     expect(
       evaluationProviderForEnv({

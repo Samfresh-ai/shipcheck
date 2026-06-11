@@ -25,7 +25,7 @@ type EvaluationProviderConfig = PublicEvaluationProviderConfig & {
 const DEFAULT_OPENAI_EVALUATION_MODEL = "gpt-5-mini";
 const DEFAULT_OPENAI_TIMEOUT_MS = 10_000;
 const DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
-const DEFAULT_NVIDIA_EVALUATION_MODEL = "nvidia/nvidia-nemotron-nano-9b-v2";
+const DEFAULT_NVIDIA_EVALUATION_MODEL = "meta/llama-3.1-8b-instruct";
 const DEFAULT_NVIDIA_TIMEOUT_MS = 30_000;
 const DEFAULT_NVIDIA_MAX_TOKENS = 900;
 const DEFAULT_NVIDIA_REQUESTS_PER_MINUTE = 40;
@@ -33,6 +33,7 @@ const DEFAULT_NVIDIA_MODEL_ATTEMPTS = 2;
 const MAX_NVIDIA_MODEL_ATTEMPTS = 2;
 const NVIDIA_FALLBACK_PRIORITY_MODELS = [
   DEFAULT_NVIDIA_EVALUATION_MODEL,
+  "nvidia/nvidia-nemotron-nano-9b-v2",
   "nvidia/llama-3.3-nemotron-super-49b-v1.5",
 ];
 const MAX_MODEL_OUTPUT_TOKENS = 900;

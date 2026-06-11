@@ -100,7 +100,7 @@ If Supabase env vars are absent, the app falls back to an in-memory store for lo
 | `OPENAI_EVALUATION_MODEL` | OpenAI model for evaluation, default `gpt-5-mini` |
 | `NVIDIA_API_KEY` | NVIDIA API Catalog key; `NVCF_RUN_KEY` also works |
 | `NVIDIA_BASE_URL` | NVIDIA OpenAI-compatible base URL, default `https://integrate.api.nvidia.com/v1` |
-| `NVIDIA_EVALUATION_MODEL` | Comma-separated NVIDIA model list for evaluation, default `nvidia/nvidia-nemotron-nano-9b-v2` |
+| `NVIDIA_EVALUATION_MODEL` | Comma-separated NVIDIA model list for evaluation, default `meta/llama-3.1-8b-instruct` |
 | `NVIDIA_MAX_TOKENS` | Per-call NVIDIA output cap, default `900`, server-capped to `900` |
 | `NVIDIA_TIMEOUT_MS` | NVIDIA request timeout, default `30000`, server-capped to `45000`; lower values are honored |
 | `NEXT_PUBLIC_NOVUS_API_KEY` | Novus/Pendo API key |
