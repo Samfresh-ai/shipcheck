@@ -5,6 +5,15 @@ type RateBucket = {
   resetAt: number;
 };
 
+type BoundedJsonOptions = {
+  maxBytes: number;
+  emptyBodyValue?: unknown;
+  tooLargeMessage?: string;
+  invalidJsonMessage?: string;
+};
+
+type BoundedJsonResult = { ok: true; data: unknown } | { ok: false; status: number; message: string };
+
 const MAX_RATE_LIMIT_BUCKETS = 2_000;
 
 const globalForRateLimit = globalThis as typeof globalThis & {
@@ -44,6 +53,59 @@ export function clientIpFromHeaders(headers: Headers): string | null {
 export function hashIp(ip: string | null | undefined): string | undefined {
   if (!ip) return undefined;
   return createHash("sha256").update(ip).digest("base64url").slice(0, 32);
+}
+
+async function readBoundedRequestText(request: Request, maxBytes: number): Promise<{ ok: true; text: string } | { ok: false }> {
+  const reader = request.body?.getReader();
+  if (!reader) {
+    return { ok: true, text: "" };
+  }
+
+  const decoder = new TextDecoder();
+  let byteLength = 0;
+  let text = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    byteLength += value.byteLength;
+    if (byteLength > maxBytes) {
+      await reader.cancel();
+      return { ok: false };
+    }
+
+    text += decoder.decode(value, { stream: true });
+  }
+
+  text += decoder.decode();
+  return { ok: true, text };
+}
+
+export async function parseBoundedJsonRequest(request: Request, options: BoundedJsonOptions): Promise<BoundedJsonResult> {
+  const contentLengthHeader = request.headers.get("content-length");
+  const contentLength = contentLengthHeader ? Number(contentLengthHeader) : 0;
+  const tooLargeMessage = options.tooLargeMessage ?? "Request body is too large.";
+  const invalidJsonMessage = options.invalidJsonMessage ?? "Request body must be valid JSON.";
+
+  if (Number.isFinite(contentLength) && contentLength > options.maxBytes) {
+    return { ok: false, status: 413, message: tooLargeMessage };
+  }
+
+  const rawBody = await readBoundedRequestText(request, options.maxBytes);
+  if (!rawBody.ok) {
+    return { ok: false, status: 413, message: tooLargeMessage };
+  }
+
+  if (!rawBody.text.trim() && "emptyBodyValue" in options) {
+    return { ok: true, data: options.emptyBodyValue };
+  }
+
+  try {
+    return { ok: true, data: JSON.parse(rawBody.text) };
+  } catch {
+    return { ok: false, status: 400, message: invalidJsonMessage };
+  }
 }
 
 export function consumeRateLimitSlot(key: string, limit: number, windowMs: number, now = Date.now()) {

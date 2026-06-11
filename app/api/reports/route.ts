@@ -3,7 +3,7 @@ import { z } from "zod";
 import { evaluateSection, formatSse, generateOverallInsight } from "@/src/lib/evaluate";
 import { projectContextSchema } from "@/src/lib/project-context";
 import { QUESTIONS, SECTIONS, SECTION_ORDER, getSectionQuestions } from "@/src/lib/questions";
-import { clientIpFromHeaders, consumeRateLimitSlot, hashIp } from "@/src/lib/request-security";
+import { clientIpFromHeaders, consumeRateLimitSlot, hashIp, parseBoundedJsonRequest } from "@/src/lib/request-security";
 import { computeOverallScore } from "@/src/lib/scoring";
 import { countRecentReportsForSession, saveReport, sessionExists } from "@/src/lib/supabase";
 
@@ -24,24 +24,6 @@ function sseError(message: string, status: number, extraHeaders?: Record<string,
     status,
     headers: { ...sseHeaders, ...(extraHeaders ?? {}) },
   });
-}
-
-async function parseBoundedJson(request: NextRequest): Promise<{ ok: true; data: unknown } | { ok: false; response: Response }> {
-  const contentLength = Number(request.headers.get("content-length") || 0);
-  if (Number.isFinite(contentLength) && contentLength > MAX_REPORT_REQUEST_BYTES) {
-    return { ok: false, response: sseError("Report request is too large.", 413) };
-  }
-
-  const rawBody = await request.text();
-  if (new TextEncoder().encode(rawBody).byteLength > MAX_REPORT_REQUEST_BYTES) {
-    return { ok: false, response: sseError("Report request is too large.", 413) };
-  }
-
-  try {
-    return { ok: true, data: JSON.parse(rawBody) };
-  } catch {
-    return { ok: false, response: sseError("Report request body must be valid JSON.", 400) };
-  }
 }
 
 const answersSchema = z.record(z.string().min(1), z.string().trim().min(20).max(MAX_ANSWER_CHARACTERS)).superRefine((answers, context) => {
@@ -73,8 +55,12 @@ const reportRequestSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const body = await parseBoundedJson(request);
-  if (!body.ok) return body.response;
+  const body = await parseBoundedJsonRequest(request, {
+    maxBytes: MAX_REPORT_REQUEST_BYTES,
+    tooLargeMessage: "Report request is too large.",
+    invalidJsonMessage: "Report request body must be valid JSON.",
+  });
+  if (!body.ok) return sseError(body.message, body.status);
 
   const payload = reportRequestSchema.safeParse(body.data);
 

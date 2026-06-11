@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { NextRequest } from "next/server";
 import { POST } from "@/app/api/sessions/route";
 import { jsonRequest } from "./helpers";
 
@@ -27,5 +28,31 @@ describe("POST /api/sessions", () => {
 
     expect(response.status).toBe(200);
     expect(json.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("rejects oversized session request bodies", async () => {
+    const response = await POST(
+      new NextRequest("http://localhost:3000/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userAgent: "x".repeat(2_500) }),
+      }),
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({ error: "Request body is too large." });
+  });
+
+  it("rejects malformed session JSON", async () => {
+    const response = await POST(
+      new NextRequest("http://localhost:3000/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "Session request body must be valid JSON." });
   });
 });
