@@ -387,11 +387,20 @@ function hasEmptyAnswerLanguage(value: string | undefined): boolean {
   return typeof value === "string" && EMPTY_ANSWER_LANGUAGE.test(value);
 }
 
-function meaningfulScore(evaluation: Partial<QuestionEvaluation> | undefined, hasSubstantiveAnswer: boolean): number {
+function meaningfulScore(
+  evaluation: Partial<QuestionEvaluation> | undefined,
+  hasSubstantiveAnswer: boolean,
+  questionId = "answer",
+): number {
   if (!hasSubstantiveAnswer) return 0;
+  if (!evaluation) {
+    throw new Error(`Missing AI evaluation for ${questionId}.`);
+  }
 
   const parsedScore = Number(evaluation?.score);
-  if (!Number.isFinite(parsedScore)) return 4;
+  if (!Number.isFinite(parsedScore)) {
+    throw new Error(`Invalid AI evaluation score for ${questionId}.`);
+  }
 
   const score = Math.max(0, Math.min(10, Math.round(parsedScore)));
   return score === 0 ? 2 : score;
@@ -418,9 +427,10 @@ function redAction(evaluation: Partial<QuestionEvaluation> | undefined, hasSubst
 export function normalizeEvaluation(
   evaluation: Partial<QuestionEvaluation> | undefined,
   answer: string,
+  questionId?: string,
 ): QuestionEvaluation {
   const hasSubstance = isSubstantiveAnswer(answer);
-  const score = meaningfulScore(evaluation, hasSubstance);
+  const score = meaningfulScore(evaluation, hasSubstance, questionId);
   const tier = tierForScore(score);
   const feedback = groundedFeedback(evaluation, answer, hasSubstance);
   const normalized: QuestionEvaluation = { score, tier, feedback };
@@ -434,6 +444,19 @@ export function normalizeEvaluation(
   }
 
   return normalized;
+}
+
+export function normalizeSectionEvaluations(
+  parsed: OpenAiEvaluationResponse,
+  questions: Question[],
+  answers: Record<string, string>,
+): SectionEvaluations {
+  return Object.fromEntries(
+    questions.map((question) => [
+      question.id,
+      normalizeEvaluation(parsed.evaluations?.[question.id], answers[question.id] ?? "", question.id),
+    ]),
+  );
 }
 
 function isMockAiEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -677,9 +700,7 @@ export async function evaluateSection(
         }
 
         const parsed = await parseEvaluationJsonResponse(text);
-        return Object.fromEntries(
-          questions.map((question) => [question.id, normalizeEvaluation(parsed.evaluations?.[question.id], answers[question.id] ?? "")]),
-        );
+        return normalizeSectionEvaluations(parsed, questions, answers);
       } catch (error) {
         errors.push(error as Error);
       }

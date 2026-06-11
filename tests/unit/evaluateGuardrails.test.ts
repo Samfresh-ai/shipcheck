@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { normalizeEvaluation } from "@/src/lib/evaluate";
+import { normalizeEvaluation, normalizeSectionEvaluations } from "@/src/lib/evaluate";
+import { QUESTIONS } from "@/src/lib/questions";
 
 describe("evaluation guardrails", () => {
   it("does not accept empty-answer feedback for a substantive answer", () => {
@@ -56,5 +57,37 @@ describe("evaluation guardrails", () => {
     expect(result.score).toBe(4);
     expect(result.tier).toBe("RED");
     expect(result.action).toBe("Quote the most surprising interview detail.");
+  });
+
+  it("fails closed when the model omits a substantive answer evaluation", () => {
+    const question = QUESTIONS[0];
+
+    expect(() =>
+      normalizeSectionEvaluations(
+        { evaluations: {} },
+        [question],
+        { [question.id]: "I interviewed 5 solo builders and watched two abandon the launch checklist on question three." },
+      ),
+    ).toThrow(`Missing AI evaluation for ${question.id}.`);
+  });
+
+  it("fails closed when the model returns a non-numeric score for a substantive answer", () => {
+    const question = QUESTIONS[0];
+
+    expect(() =>
+      normalizeSectionEvaluations(
+        {
+          evaluations: {
+            [question.id]: {
+              score: "unclear" as unknown as number,
+              tier: "RED",
+              feedback: "The answer cites real interviews but does not prove repeatability.",
+            },
+          },
+        },
+        [question],
+        { [question.id]: "I interviewed 5 solo builders and watched two abandon the launch checklist on question three." },
+      ),
+    ).toThrow(`Invalid AI evaluation score for ${question.id}.`);
   });
 });
