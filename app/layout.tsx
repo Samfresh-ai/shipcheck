@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import { Footer } from "@/components/layout/Footer";
 import { Header } from "@/components/layout/Header";
+import { jsonForInlineScript } from "@/src/lib/html-security";
 import "./globals.css";
 
 const plexSans = IBM_Plex_Sans({
@@ -49,7 +50,7 @@ export default function RootLayout({
                 o.__shipcheckSchedule=function(){if('requestIdleCallback' in p){p.requestIdleCallback(o.__shipcheckLoad,{timeout:8000});}else{p.setTimeout(o.__shipcheckLoad,6000);}};
                 if(e.readyState==='complete'){p.setTimeout(o.__shipcheckSchedule,4000);}else{p.addEventListener('load',function(){p.setTimeout(o.__shipcheckSchedule,4000);},{once:true});}
                 })(window,document,'script','pendo');
-              })('${process.env.NEXT_PUBLIC_NOVUS_API_KEY || ""}');
+              })(${jsonForInlineScript(process.env.NEXT_PUBLIC_NOVUS_API_KEY || "")});
             `,
           }}
         />

@@ -1,4 +1,5 @@
 import { SAMPLE_REPORT_ID } from "@/src/lib/sample-report";
+import { jsonForInlineScript, reportHref } from "@/src/lib/html-security";
 
 export const dynamic = "force-static";
 
@@ -16,7 +17,7 @@ function analyticsScript(apiKey: string) {
       o.__shipcheckSchedule=function(){if('requestIdleCallback' in p){p.requestIdleCallback(o.__shipcheckLoad,{timeout:8000});}else{p.setTimeout(o.__shipcheckLoad,6000);}};
       if(e.readyState==='complete'){p.setTimeout(o.__shipcheckSchedule,4000);}else{p.addEventListener('load',function(){p.setTimeout(o.__shipcheckSchedule,4000);},{once:true});}
       })(window,document,'script','pendo');
-    })(${JSON.stringify(apiKey)});
+    })(${jsonForInlineScript(apiKey)});
   `;
 }
 
@@ -63,6 +64,7 @@ const sessionScript = `
 
 function landingHtml() {
   const sampleId = process.env.SEED_REPORT_ID || SAMPLE_REPORT_ID;
+  const sampleReportHref = reportHref(sampleId);
   const novusKey = process.env.NEXT_PUBLIC_NOVUS_API_KEY || "";
 
   return `<!doctype html>
@@ -150,9 +152,9 @@ function landingHtml() {
         <p class="lead">20 questions. 10 minutes. An honest score of your product's readiness - with AI feedback on every weak answer.</p>
         <div class="actions">
           <a class="button" href="/check">Check your product -&gt;</a>
-          <a class="button secondary" href="/report/${sampleId}">See a sample report -&gt;</a>
+          <a class="button secondary" href="${sampleReportHref}">See a sample report -&gt;</a>
         </div>
-        <a class="sample-link" href="/report/${sampleId}">Read the ShipCheck-evaluating-ShipCheck report</a>
+        <a class="sample-link" href="${sampleReportHref}">Read the ShipCheck-evaluating-ShipCheck report</a>
       </div>
       <aside class="steps">
         <p class="mono">How it works</p>
@@ -169,7 +171,7 @@ function landingHtml() {
         <div>
           <p class="statement">ShipCheck was built for the Mind the Product World Product Day 2026 hackathon. Before submitting, we ran it through itself.</p>
           <p class="body">Score: 67 - Almost Ready. RED: distribution plan. AMBER: retention strategy. GREEN: user definition and problem clarity. The distribution section was the first thing rewritten after seeing the results.</p>
-          <a class="sample-link" href="/report/${sampleId}">Read the ShipCheck report -&gt;</a>
+          <a class="sample-link" href="${sampleReportHref}">Read the ShipCheck report -&gt;</a>
         </div>
       </div>
     </section>
